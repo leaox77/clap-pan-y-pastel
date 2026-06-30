@@ -46,41 +46,42 @@ export default function Usuarios() {
   const ROLE_BADGE = { cajero: 'badge-info', administrador: 'badge-warn', propietaria: 'badge-ok' }
 
   return (
-    <div style={{ padding: 28, maxWidth: 900 }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24, gap: 12 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, flex: 1 }}>Usuarios del sistema</h2>
+    <div className="page-wrap">
+      <div className="toolbar-wrap" style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, flex: 1, minWidth: 180 }}>Usuarios del sistema</h2>
         <button className="btn-primary" onClick={() => setModal(true)}>+ Nuevo usuario</button>
       </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        <table className="clap-table">
-          <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th>Creado</th><th>Acciones</th></tr></thead>
-          <tbody>
-            {usuarios.map(u => (
-              <tr key={u.id}>
-                <td style={{ fontWeight: 600 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--yellow)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700 }}>
-                      {u.full_name?.[0]?.toUpperCase() ?? '?'}
+        <div className="table-scroll">
+          <table className="clap-table">
+            <thead><tr><th>Nombre</th><th>Rol</th><th>Estado</th><th>Creado</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {usuarios.map(u => (
+                <tr key={u.id}>
+                  <td style={{ fontWeight: 600 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--yellow)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
+                        {u.full_name?.[0]?.toUpperCase() ?? '?'}
+                      </div>
+                      {u.full_name}
                     </div>
-                    {u.full_name}
-                  </div>
-                </td>
-                <td style={{ color: 'var(--text-soft)' }}>{u.id}</td>
-                <td><span className={ROLE_BADGE[u.role] ?? 'badge-info'}>{u.role}</span></td>
-                <td><span className={u.active ? 'badge-ok' : 'badge-err'}>{u.active ? 'Activo' : 'Inactivo'}</span></td>
-                <td style={{ color: 'var(--text-soft)', fontSize: 12 }}>{new Date(u.created_at).toLocaleDateString('es-BO')}</td>
-                <td>
-                  <button onClick={() => toggleActivo(u.id, u.active)}
-                    className={u.active ? 'btn-secondary' : 'btn-primary'}
-                    style={{ padding: '4px 12px', fontSize: 11 }}>
-                    {u.active ? 'Desactivar' : 'Activar'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  </td>
+                  <td><span className={ROLE_BADGE[u.role] ?? 'badge-info'}>{u.role}</span></td>
+                  <td><span className={u.active ? 'badge-ok' : 'badge-err'}>{u.active ? 'Activo' : 'Inactivo'}</span></td>
+                  <td style={{ color: 'var(--text-soft)', fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(u.created_at).toLocaleDateString('es-BO')}</td>
+                  <td>
+                    <button onClick={() => toggleActivo(u.id, u.active)}
+                      className={u.active ? 'btn-secondary' : 'btn-primary'}
+                      style={{ padding: '4px 12px', fontSize: 11, whiteSpace: 'nowrap' }}>
+                      {u.active ? 'Desactivar' : 'Activar'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <Modal open={modal} onClose={() => setModal(false)} title="Crear nuevo usuario">

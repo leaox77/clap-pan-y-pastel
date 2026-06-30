@@ -17,7 +17,6 @@ export default function Inventario() {
   const [modalProd, setModalProd] = useState(false)
   const [categorias, setCategorias] = useState([])
 
-  // Forms
   const [fIngreso, setFIngreso] = useState({ cantidad: '', nota: '' })
   const [fMerma, setFMerma] = useState({ tipo: 'merma_danado', cantidad: '', nota: '' })
   const [fProd, setFProd] = useState({ nombre: '', precio_venta: '', costo_unitario: '', stock_actual: '', stock_minimo: 5, categoria_id: '' })
@@ -35,9 +34,7 @@ export default function Inventario() {
 
   async function registrarIngreso() {
     const { error } = await supabase.rpc('registrar_ingreso_inventario', {
-      p_producto_id: modalIngreso.id,
-      p_cantidad: Number(fIngreso.cantidad),
-      p_nota: fIngreso.nota,
+      p_producto_id: modalIngreso.id, p_cantidad: Number(fIngreso.cantidad), p_nota: fIngreso.nota,
     })
     if (error) { toast(error.message, 'err'); return }
     toast('Ingreso registrado', 'ok')
@@ -47,10 +44,7 @@ export default function Inventario() {
 
   async function registrarMerma() {
     const { error } = await supabase.rpc('registrar_merma', {
-      p_producto_id: modalMerma.id,
-      p_subtipo: fMerma.tipo,
-      p_cantidad: Number(fMerma.cantidad),
-      p_nota: fMerma.nota,
+      p_producto_id: modalMerma.id, p_subtipo: fMerma.tipo, p_cantidad: Number(fMerma.cantidad), p_nota: fMerma.nota,
     })
     if (error) { toast(error.message, 'err'); return }
     toast('Merma registrada', 'ok')
@@ -60,12 +54,8 @@ export default function Inventario() {
 
   async function crearProducto() {
     const { error } = await supabase.from('productos').insert({
-      nombre: fProd.nombre,
-      precio_venta: Number(fProd.precio_venta),
-      costo_unitario: Number(fProd.costo_unitario),
-      stock_actual: Number(fProd.stock_actual),
-      stock_minimo: Number(fProd.stock_minimo),
-      categoria_id: fProd.categoria_id || null,
+      nombre: fProd.nombre, precio_venta: Number(fProd.precio_venta), costo_unitario: Number(fProd.costo_unitario),
+      stock_actual: Number(fProd.stock_actual), stock_minimo: Number(fProd.stock_minimo), categoria_id: fProd.categoria_id || null,
     })
     if (error) { toast(error.message, 'err'); return }
     toast('Producto creado', 'ok')
@@ -78,20 +68,19 @@ export default function Inventario() {
   )
 
   return (
-    <div style={{ padding: 28 }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24, gap: 12 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, flex: 1 }}>Inventario del día</h2>
+    <div className="page-wrap">
+      <div className="toolbar-wrap" style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, flex: 1, minWidth: 200 }}>Inventario del día</h2>
         <button className="btn-secondary" onClick={() => setModalProd(true)} style={{ fontSize: 13 }}>+ Nuevo producto</button>
       </div>
 
-      {/* Métricas */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 22 }}>
+      <div className="grid-4" style={{ marginBottom: 22 }}>
         {[
-          ['Total productos', productos.length, 'info'],
-          ['Stock OK', productos.filter(p => p.stock_actual > p.stock_minimo).length, 'ok'],
-          ['Stock bajo', productos.filter(p => p.stock_actual <= p.stock_minimo && p.stock_actual > 0).length, 'warn'],
-          ['Agotados', productos.filter(p => p.stock_actual <= 0).length, 'err'],
-        ].map(([l, v, t]) => (
+          ['Total productos', productos.length],
+          ['Stock OK', productos.filter(p => p.stock_actual > p.stock_minimo).length],
+          ['Stock bajo', productos.filter(p => p.stock_actual <= p.stock_minimo && p.stock_actual > 0).length],
+          ['Agotados', productos.filter(p => p.stock_actual <= 0).length],
+        ].map(([l, v]) => (
           <div key={l} className="card" style={{ padding: '14px 18px' }}>
             <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4 }}>{l}</p>
             <p style={{ fontSize: 26, fontWeight: 700 }}>{v}</p>
@@ -99,11 +88,10 @@ export default function Inventario() {
         ))}
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--silver-light)', marginBottom: 0 }}>
+      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--silver-light)', overflowX: 'auto' }}>
         {[['todos','Todos'], ['bajo','Stock bajo'], ['agotado','Agotados']].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{
-            padding: '9px 20px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+            padding: '9px 20px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
             color: tab === k ? 'var(--text)' : 'var(--text-soft)',
             borderBottom: tab === k ? '2px solid var(--yellow-dark)' : '2px solid transparent', marginBottom: -2,
           }}>{l}</button>
@@ -111,40 +99,37 @@ export default function Inventario() {
       </div>
 
       <div className="card" style={{ overflow: 'hidden', borderTop: 'none', borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-        <table className="clap-table">
-          <thead>
-            <tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Mín.</th><th>Estado</th><th>Acciones</th></tr>
-          </thead>
-          <tbody>
-            {filtrados.length === 0
-              ? <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-soft)', padding: 32 }}>Sin registros</td></tr>
-              : filtrados.map(p => (
-                <tr key={p.id}>
-                  <td style={{ fontWeight: 600 }}>{p.nombre}</td>
-                  <td style={{ color: 'var(--text-soft)' }}>{p.categorias?.nombre ?? '—'}</td>
-                  <td>Bs {Number(p.precio_venta).toFixed(2)}</td>
-                  <td style={{ fontWeight: 700 }}>{p.stock_actual}</td>
-                  <td style={{ color: 'var(--text-soft)' }}>{p.stock_minimo}</td>
-                  <td>
-                    {p.stock_actual <= 0
-                      ? <span className="badge-err">Agotado</span>
-                      : p.stock_actual <= p.stock_minimo
-                        ? <span className="badge-warn">Bajo</span>
+        <div className="table-scroll">
+          <table className="clap-table">
+            <thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Mín.</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {filtrados.length === 0
+                ? <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-soft)', padding: 32 }}>Sin registros</td></tr>
+                : filtrados.map(p => (
+                  <tr key={p.id}>
+                    <td style={{ fontWeight: 600 }}>{p.nombre}</td>
+                    <td style={{ color: 'var(--text-soft)' }}>{p.categorias?.nombre ?? '—'}</td>
+                    <td>Bs {Number(p.precio_venta).toFixed(2)}</td>
+                    <td style={{ fontWeight: 700 }}>{p.stock_actual}</td>
+                    <td style={{ color: 'var(--text-soft)' }}>{p.stock_minimo}</td>
+                    <td>
+                      {p.stock_actual <= 0 ? <span className="badge-err">Agotado</span>
+                        : p.stock_actual <= p.stock_minimo ? <span className="badge-warn">Bajo</span>
                         : <span className="badge-ok">OK</span>}
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setModalIngreso(p)}>+ Ingreso</button>
-                      <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: 11, color: 'var(--warn)' }} onClick={() => setModalMerma(p)}>Merma</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setModalIngreso(p)}>+ Ingreso</button>
+                        <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: 11, color: 'var(--warn)' }} onClick={() => setModalMerma(p)}>Merma</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* Modal ingreso */}
       <Modal open={!!modalIngreso} onClose={() => setModalIngreso(null)} title={`Registrar ingreso — ${modalIngreso?.nombre}`}>
         <label className="form-label">Cantidad que ingresa</label>
         <input className="form-input" type="number" style={{ marginBottom: 12 }} value={fIngreso.cantidad} onChange={e => setFIngreso(f => ({ ...f, cantidad: e.target.value }))} placeholder="0" />
@@ -156,7 +141,6 @@ export default function Inventario() {
         </div>
       </Modal>
 
-      {/* Modal merma */}
       <Modal open={!!modalMerma} onClose={() => setModalMerma(null)} title={`Registrar merma — ${modalMerma?.nombre}`}>
         <label className="form-label">Tipo de merma</label>
         <select className="form-input form-select" style={{ marginBottom: 12 }} value={fMerma.tipo} onChange={e => setFMerma(f => ({ ...f, tipo: e.target.value }))}>
@@ -172,9 +156,8 @@ export default function Inventario() {
         </div>
       </Modal>
 
-      {/* Modal nuevo producto */}
       <Modal open={modalProd} onClose={() => setModalProd(false)} title="Nuevo producto">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+        <div className="grid-2" style={{ marginBottom: 12 }}>
           <div style={{ gridColumn: '1/-1' }}>
             <label className="form-label">Nombre del producto</label>
             <input className="form-input" value={fProd.nombre} onChange={e => setFProd(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej: Pan de queso" />

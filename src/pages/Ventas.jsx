@@ -5,7 +5,6 @@ import Modal from '../components/Modal'
 
 const BILLETES = [10, 20, 50, 100, 200]
 const MEDIOS = ['efectivo','qr','transferencia','combinado']
-const MERMA_TIPOS = ['merma_danado','merma_vencido','merma_consumo_interno','merma_degustacion','merma_donacion','merma_regalo','merma_diferencia']
 
 export default function Ventas() {
   const toast = useToast()
@@ -62,7 +61,7 @@ export default function Ventas() {
   async function confirmarCobro() {
     if (!cajaSesionId) { toast('Primero abre la caja del día', 'warn'); return }
     setProcesando(true)
-    const { data, error } = await supabase.rpc('procesar_venta', {
+    const { error } = await supabase.rpc('procesar_venta', {
       p_caja_sesion_id: cajaSesionId,
       p_items: carrito.map(i => ({ producto_id: i.id, cantidad: i.cantidad })),
       p_medio_pago: medioPago,
@@ -81,9 +80,9 @@ export default function Ventas() {
     .filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
+    <div className="split-layout">
       {/* Catálogo */}
-      <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
+      <div style={{ flex: 1, minWidth: 0, padding: 24, paddingTop: 64, overflowY: 'auto' }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Punto de Venta</h2>
 
         {!cajaSesionId && (
@@ -92,13 +91,11 @@ export default function Ventas() {
           </div>
         )}
 
-        {/* Búsqueda */}
         <div style={{ position: 'relative', marginBottom: 14 }}>
           <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-soft)', fontSize: 16 }}>🔍</span>
           <input className="form-input" style={{ paddingLeft: 36 }} placeholder="Buscar producto..." value={busqueda} onChange={e => setBusqueda(e.target.value)} />
         </div>
 
-        {/* Categorías */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
           {[{ id: 'Todos', nombre: 'Todos' }, ...categorias].map(c => (
             <button key={c.id} onClick={() => setCatActiva(c.id)}
@@ -111,19 +108,14 @@ export default function Ventas() {
           ))}
         </div>
 
-        {/* Grid de productos */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
           {prodsFiltrados.map(p => (
             <button key={p.id} onClick={() => agregar(p)} disabled={p.stock_actual <= 0}
               style={{ background: 'var(--bg)', border: '1.5px solid var(--silver-light)', borderRadius: 12, padding: 14,
                 textAlign: 'left', cursor: p.stock_actual > 0 ? 'pointer' : 'not-allowed', transition: 'border-color .15s',
-                opacity: p.stock_actual <= 0 ? .5 : 1 }}
-              onMouseEnter={e => { if(p.stock_actual > 0) e.currentTarget.style.borderColor = 'var(--yellow)' }}
-              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--silver-light)'}>
-              <div style={{ width: '100%', height: 56, background: 'var(--yellow-soft)', borderRadius: 8, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>
-                🍞
-              </div>
-              <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{p.nombre}</p>
+                opacity: p.stock_actual <= 0 ? .5 : 1, minWidth: 0 }}>
+              <div style={{ width: '100%', height: 56, background: 'var(--yellow-soft)', borderRadius: 8, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>🍞</div>
+              <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</p>
               <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-soft)', marginBottom: 4 }}>Bs {Number(p.precio_venta).toFixed(2)}</p>
               <span className={p.stock_actual <= p.stock_minimo && p.stock_actual > 0 ? 'badge-warn' : p.stock_actual <= 0 ? 'badge-err' : 'badge-ok'} style={{ fontSize: 10 }}>
                 {p.stock_actual <= 0 ? 'Agotado' : `Stock: ${p.stock_actual}`}
@@ -148,13 +140,12 @@ export default function Ventas() {
           <span style={{ fontSize: 12, color: 'var(--text-soft)' }}>{carrito.length} items</span>
         </div>
 
-        {/* Items del carrito */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', minHeight: 100 }}>
           {carrito.length === 0
             ? <p style={{ color: 'var(--text-soft)', fontSize: 13, textAlign: 'center', marginTop: 40 }}>Selecciona productos del catálogo</p>
             : carrito.map(i => (
-              <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 12, marginBottom: 12, borderBottom: '1px solid var(--silver-light)', fontSize: 13 }}>
-                <div style={{ flex: 1 }}>
+              <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 12, marginBottom: 12, borderBottom: '1px solid var(--silver-light)', fontSize: 13, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 80 }}>
                   <p style={{ fontWeight: 600, marginBottom: 2 }}>{i.nombre}</p>
                   <p style={{ color: 'var(--text-soft)', fontSize: 12 }}>Bs {Number(i.precio_venta).toFixed(2)} c/u</p>
                 </div>
@@ -169,7 +160,6 @@ export default function Ventas() {
             ))}
         </div>
 
-        {/* Cobro */}
         <div style={{ padding: '14px 16px', borderTop: '1px solid var(--silver-light)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 700, marginBottom: 14 }}>
             <span>Total</span><span>Bs {total.toFixed(2)}</span>
@@ -182,7 +172,6 @@ export default function Ventas() {
         </div>
       </div>
 
-      {/* Modal de cobro */}
       <Modal open={modalCobro} onClose={() => setModalCobro(false)} title="Confirmar cobro">
         <div style={{ marginBottom: 14, background: 'var(--bg-soft)', borderRadius: 10, padding: 14 }}>
           {carrito.map(i => (
@@ -231,7 +220,6 @@ export default function Ventas() {
           </button>
         </div>
 
-        {/* Historial reciente debajo */}
         {historial.length > 0 && (
           <div style={{ marginTop: 20, borderTop: '1px solid var(--silver-light)', paddingTop: 14 }}>
             <p style={{ fontSize: 12, color: 'var(--text-soft)', marginBottom: 8, fontWeight: 600 }}>VENTAS DE HOY</p>

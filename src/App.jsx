@@ -14,9 +14,9 @@ import Usuarios from './pages/Usuarios'
 
 function Layout({ children }) {
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', width: '100%', maxWidth: '100vw', overflowX: 'hidden' }}>
       <Sidebar />
-      <main style={{ flex: 1, overflowY: 'auto', background: 'var(--bg-soft)' }}>
+      <main style={{ flex: 1, minWidth: 0, width: '100%', overflowX: 'hidden', overflowY: 'auto', background: 'var(--bg-soft)' }}>
         {children}
       </main>
     </div>

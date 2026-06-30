@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
@@ -19,19 +20,20 @@ const ICONS = {
 }
 
 const ALL_LINKS = [
-  { to: '/',           label: 'Dashboard',   key: 'dashboard',  roles: ['cajero','administrador','propietaria'] },
-  { to: '/ventas',     label: 'Ventas / POS', key: 'ventas',    roles: ['cajero','administrador','propietaria'] },
-  { to: '/inventario', label: 'Inventario',  key: 'inventario', roles: ['cajero','administrador','propietaria'] },
-  { to: '/caja',       label: 'Caja',        key: 'caja',       roles: ['cajero','administrador','propietaria'] },
-  { to: '/gastos',     label: 'Gastos',      key: 'gastos',     roles: ['cajero','administrador','propietaria'] },
-  { to: '/mermas',     label: 'Mermas',      key: 'mermas',     roles: ['cajero','administrador','propietaria'] },
-  { to: '/reportes',   label: 'Reportes',    key: 'reportes',   roles: ['administrador','propietaria'] },
-  { to: '/usuarios',   label: 'Usuarios',    key: 'usuarios',   roles: ['administrador','propietaria'] },
+  { to: '/',           label: 'Dashboard',    key: 'dashboard',  roles: ['cajero','administrador','propietaria'] },
+  { to: '/ventas',     label: 'Ventas / POS', key: 'ventas',     roles: ['cajero','administrador','propietaria'] },
+  { to: '/inventario', label: 'Inventario',   key: 'inventario', roles: ['cajero','administrador','propietaria'] },
+  { to: '/caja',       label: 'Caja',         key: 'caja',       roles: ['cajero','administrador','propietaria'] },
+  { to: '/gastos',     label: 'Gastos',       key: 'gastos',     roles: ['cajero','administrador','propietaria'] },
+  { to: '/mermas',     label: 'Mermas',       key: 'mermas',     roles: ['cajero','administrador','propietaria'] },
+  { to: '/reportes',   label: 'Reportes',     key: 'reportes',   roles: ['administrador','propietaria'] },
+  { to: '/usuarios',   label: 'Usuarios',     key: 'usuarios',   roles: ['administrador','propietaria'] },
 ]
 
 export default function Sidebar() {
   const { user, role, signOut } = useAuth()
   const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
   const links = ALL_LINKS.filter(l => l.roles.includes(role))
 
   const initials = (user?.email?.[0] ?? '?').toUpperCase()
@@ -42,57 +44,71 @@ export default function Sidebar() {
     navigate('/login')
   }
 
+  function handleNavClick() {
+    setOpen(false)
+  }
+
   return (
-    <aside style={{
-      width: 220, background: 'var(--bg)', borderRight: '1px solid var(--silver-light)',
-      display: 'flex', flexDirection: 'column', height: '100vh', flexShrink: 0,
-    }}>
-      {/* Logo */}
-      <div style={{ padding: '22px 20px 16px', borderBottom: '1px solid var(--silver-light)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 36, height: 36, background: 'var(--yellow)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
-            👏
-          </div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.2 }}>CLAP</div>
-            <div style={{ fontSize: 10, color: 'var(--text-soft)', letterSpacing: '.06em' }}>PAN Y PASTEL</div>
+    <>
+      {/* Botón hamburguesa — solo visible en móvil vía CSS */}
+      <button onClick={() => setOpen(o => !o)} className="mobile-menu-btn" aria-label="Abrir menú">
+        {open ? '×' : '☰'}
+      </button>
+
+      {/* Overlay oscuro detrás del menú abierto en móvil */}
+      {open && <div onClick={() => setOpen(false)} className="mobile-overlay" />}
+
+      <aside className={`clap-sidebar ${open ? 'open' : ''}`} style={{
+        width: 220, background: 'var(--bg)', borderRight: '1px solid var(--silver-light)',
+        display: 'flex', flexDirection: 'column', height: '100vh', flexShrink: 0,
+      }}>
+        {/* Logo */}
+        <div style={{ padding: '22px 20px 16px', borderBottom: '1px solid var(--silver-light)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 36, height: 36, background: 'var(--yellow)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
+              👏
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.2 }}>CLAP</div>
+              <div style={{ fontSize: 10, color: 'var(--text-soft)', letterSpacing: '.06em' }}>PAN Y PASTEL</div>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Nav */}
-      <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}>
-        {links.map(l => (
-          <NavLink key={l.to} to={l.to} end={l.to === '/'}
-            style={({ isActive }) => ({
-              display: 'flex', alignItems: 'center', gap: 10, padding: '9px 18px',
-              textDecoration: 'none', fontSize: 13, fontWeight: 500, borderRadius: 0,
-              color: isActive ? 'var(--text)' : 'var(--text-soft)',
-              background: isActive ? 'var(--yellow-soft)' : 'transparent',
-              borderRight: isActive ? '3px solid var(--yellow-dark)' : '3px solid transparent',
-              transition: 'all .15s',
-            })}>
-            <Icon d={ICONS[l.key]} />
-            {l.label}
-          </NavLink>
-        ))}
-      </nav>
+        {/* Nav */}
+        <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}>
+          {links.map(l => (
+            <NavLink key={l.to} to={l.to} end={l.to === '/'} onClick={handleNavClick}
+              style={({ isActive }) => ({
+                display: 'flex', alignItems: 'center', gap: 10, padding: '9px 18px',
+                textDecoration: 'none', fontSize: 13, fontWeight: 500, borderRadius: 0,
+                color: isActive ? 'var(--text)' : 'var(--text-soft)',
+                background: isActive ? 'var(--yellow-soft)' : 'transparent',
+                borderRight: isActive ? '3px solid var(--yellow-dark)' : '3px solid transparent',
+                transition: 'all .15s',
+              })}>
+              <Icon d={ICONS[l.key]} />
+              {l.label}
+            </NavLink>
+          ))}
+        </nav>
 
-      {/* User */}
-      <div style={{ padding: '14px 18px', borderTop: '1px solid var(--silver-light)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--yellow)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
-            {initials}
+        {/* User */}
+        <div style={{ padding: '14px 18px', borderTop: '1px solid var(--silver-light)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--yellow)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
+              {initials}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-soft)' }}>{roleLabel}</div>
+            </div>
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-soft)' }}>{roleLabel}</div>
-          </div>
+          <button onClick={handleSignOut} className="btn-secondary" style={{ width: '100%', fontSize: 12, padding: '7px 12px' }}>
+            Cerrar sesión
+          </button>
         </div>
-        <button onClick={handleSignOut} className="btn-secondary" style={{ width: '100%', fontSize: 12, padding: '7px 12px' }}>
-          Cerrar sesión
-        </button>
-      </div>
-    </aside>
+      </aside>
+    </>
   )
 }

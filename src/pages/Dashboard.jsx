@@ -4,9 +4,9 @@ import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 
 const MetricCard = ({ label, value, badge, badgeType = 'ok', sub }) => (
-  <div className="card" style={{ padding: '18px 20px' }}>
+  <div className="card" style={{ padding: '18px 20px', minWidth: 0 }}>
     <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>{label}</p>
-    <p style={{ fontSize: 26, fontWeight: 700, marginBottom: 4 }}>{value}</p>
+    <p style={{ fontSize: 24, fontWeight: 700, marginBottom: 4, wordBreak: 'break-word' }}>{value}</p>
     {badge && <span className={`badge-${badgeType}`}>{badge}</span>}
     {sub && <p style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 4 }}>{sub}</p>}
   </div>
@@ -42,37 +42,37 @@ export default function Dashboard() {
     setLoading(false)
   }
 
-  if (loading) return <div style={{ padding: 40, color: 'var(--text-soft)' }}>Cargando dashboard...</div>
+  if (loading) return <div className="page-wrap" style={{ color: 'var(--text-soft)' }}>Cargando dashboard...</div>
 
   const { ventasHoy, totalHoy, stockBajo, ultimasVentas, gastoHoy } = data
   const hoy = new Date().toLocaleDateString('es-BO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
   return (
-    <div style={{ padding: 28, maxWidth: 1200 }}>
+    <div className="page-wrap">
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Dashboard</h1>
         <p style={{ color: 'var(--text-soft)', fontSize: 14, textTransform: 'capitalize' }}>{hoy}</p>
       </div>
 
       {stockBajo.length > 0 && (
-        <div style={{ background: 'var(--warn-bg)', borderLeft: '4px solid var(--warn)', borderRadius: 10, padding: '12px 16px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--warn)' }}>
-          <span style={{ fontSize: 16 }}>⚠</span>
+        <div style={{ background: 'var(--warn-bg)', borderLeft: '4px solid var(--warn)', borderRadius: 10, padding: '12px 16px', marginBottom: 24, display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: 'var(--warn)' }}>
+          <span style={{ fontSize: 16, flexShrink: 0 }}>⚠</span>
           <span><strong>Stock bajo:</strong> {stockBajo.map(p => `${p.nombre} (${p.stock_actual})`).join(' · ')}</span>
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16, marginBottom: 28 }}>
+      <div className="grid-4" style={{ marginBottom: 28 }}>
         <MetricCard label="Ventas del día" value={ventasHoy} badge={ventasHoy > 0 ? 'Activo' : 'Sin ventas'} badgeType="ok" />
         <MetricCard label="Total del día" value={`Bs ${totalHoy.toFixed(2)}`} badge="Acumulado" badgeType="info" />
         <MetricCard label="Stock bajo" value={stockBajo.length} badge={stockBajo.length > 0 ? 'Revisar' : 'OK'} badgeType={stockBajo.length > 0 ? 'warn' : 'ok'} />
         {role !== 'cajero' && <MetricCard label="Gastos hoy" value={`Bs ${gastoHoy.toFixed(2)}`} badge="Caja chica" badgeType="warn" />}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+      <div className="grid-2" style={{ marginBottom: 20 }}>
         {/* Acciones rápidas */}
         <div className="card" style={{ padding: 22 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Acciones rápidas</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div className="grid-2" style={{ gap: 10 }}>
             {[
               { label: '+ Nueva venta', path: '/ventas', color: 'var(--yellow)' },
               { label: 'Inventario', path: '/inventario', color: 'var(--silver-light)' },
@@ -94,9 +94,9 @@ export default function Dashboard() {
           {stockBajo.length === 0
             ? <p style={{ color: 'var(--text-soft)', fontSize: 13 }}>✓ Todos los productos tienen stock suficiente</p>
             : stockBajo.slice(0, 5).map(p => (
-              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--silver-light)', fontSize: 13 }}>
-                <span>{p.nombre}</span>
-                <span className="badge-warn">{p.stock_actual} unid.</span>
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--silver-light)', fontSize: 13, gap: 8 }}>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</span>
+                <span className="badge-warn" style={{ flexShrink: 0 }}>{p.stock_actual} unid.</span>
               </div>
             ))}
         </div>
@@ -107,21 +107,23 @@ export default function Dashboard() {
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--silver-light)', display: 'flex', alignItems: 'center' }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>Últimas ventas del día</h3>
         </div>
-        <table className="clap-table">
-          <thead><tr><th>Hora</th><th>Total</th><th>Medio de pago</th><th>Vendedor</th></tr></thead>
-          <tbody>
-            {ultimasVentas.length === 0
-              ? <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-soft)', padding: 24 }}>Sin ventas registradas hoy</td></tr>
-              : ultimasVentas.map(v => (
-                <tr key={v.id}>
-                  <td>{new Date(v.fecha).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}</td>
-                  <td style={{ fontWeight: 600 }}>Bs {Number(v.total).toFixed(2)}</td>
-                  <td><span className="badge-info">{v.medio_pago}</span></td>
-                  <td style={{ color: 'var(--text-soft)' }}>{v.profiles?.full_name ?? '—'}</td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table className="clap-table">
+            <thead><tr><th>Hora</th><th>Total</th><th>Medio de pago</th><th>Vendedor</th></tr></thead>
+            <tbody>
+              {ultimasVentas.length === 0
+                ? <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-soft)', padding: 24 }}>Sin ventas registradas hoy</td></tr>
+                : ultimasVentas.map(v => (
+                  <tr key={v.id}>
+                    <td>{new Date(v.fecha).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}</td>
+                    <td style={{ fontWeight: 600 }}>Bs {Number(v.total).toFixed(2)}</td>
+                    <td><span className="badge-info">{v.medio_pago}</span></td>
+                    <td style={{ color: 'var(--text-soft)' }}>{v.profiles?.full_name ?? '—'}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )
