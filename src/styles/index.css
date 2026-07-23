@@ -159,3 +159,9 @@ html, body, #root {
 }
 
 * { min-width: 0; }
+
+.login-logo-mobile { display: none; }
+@media (max-width: 768px) {
+  .login-panel-left { display: none !important; }
+  .login-logo-mobile { display: block; }
+}

@@ -21,8 +21,8 @@ export default function Login() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', background: 'var(--bg-soft)' }}>
-      {/* Panel izquierdo */}
-      <div style={{ width: '42%', background: 'var(--text)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 40px' }}>
+      {/* Panel izquierdo: solo visible en pantallas grandes */}
+      <div style={{ width: '42%', background: 'var(--text)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 40px' }} className="login-panel-left">
         <div style={{ fontSize: 48, marginBottom: 20 }}>👏</div>
         <h1 style={{ color: '#fff', fontSize: 26, fontWeight: 700, textAlign: 'center', marginBottom: 6 }}>CLAP</h1>
         <p style={{ color: 'var(--silver)', fontSize: 13, textAlign: 'center', letterSpacing: '.06em', marginBottom: 32 }}>PAN Y PASTEL — GESTIÓN</p>
@@ -36,29 +36,35 @@ export default function Login() {
         </div>
       </div>
 
-      {/* Panel derecho */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
+      {/* Panel derecho: siempre visible, ocupa todo en móvil */}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
         <div style={{ width: '100%', maxWidth: 380 }}>
+          <div style={{ textAlign: 'center', marginBottom: 32 }} className="login-logo-mobile">
+            <div style={{ fontSize: 48 }}>👏</div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>CLAP</h1>
+            <p style={{ color: 'var(--text-soft)', fontSize: 12, letterSpacing: '.06em' }}>PAN Y PASTEL — GESTIÓN</p>
+          </div>
+
           <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 6 }}>Iniciar sesión</h2>
-          <p style={{ color: 'var(--text-soft)', fontSize: 14, marginBottom: 28 }}>Ingresa tus credenciales para acceder al sistema</p>
+          <p style={{ color: 'var(--text-soft)', fontSize: 14, marginBottom: 28 }}>Ingresa tus credenciales para acceder</p>
 
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
               <label className="form-label">Correo electrónico</label>
               <input className="form-input" type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="usuario@panaderia.com" required autoComplete="email" />
+                placeholder="usuario@panaderia.com" required autoComplete="email" style={{ fontSize: 16 }} />
             </div>
             <div>
               <label className="form-label">Contraseña</label>
               <input className="form-input" type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••" required autoComplete="current-password" />
+                placeholder="••••••••" required autoComplete="current-password" style={{ fontSize: 16 }} />
             </div>
             {error && (
               <div style={{ background: 'var(--err-bg)', color: 'var(--err)', padding: '10px 14px', borderRadius: 8, fontSize: 13, borderLeft: '3px solid var(--err)' }}>
                 {error}
               </div>
             )}
-            <button className="btn-primary" type="submit" disabled={loading} style={{ padding: '13px', fontSize: 15, marginTop: 4 }}>
+            <button className="btn-primary" type="submit" disabled={loading} style={{ padding: 16, fontSize: 16, marginTop: 4 }}>
               {loading ? 'Ingresando...' : 'Iniciar sesión'}
             </button>
           </form>

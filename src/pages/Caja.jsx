@@ -5,116 +5,233 @@ import Modal from '../components/Modal'
 
 const DENOMS = [200, 100, 50, 20, 10, 5, 2, 1, 0.50, 0.20, 0.10]
 
-function DenomInput({ value, onChange }) {
+function totalDenoms(d) { return DENOMS.reduce((s, k) => s + (d[k] ?? 0) * k, 0) }
+
+function DenomInput({ value, onChange, compact = false }) {
   return (
-    <div>
-      <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-soft)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.05em' }}>Conteo de denominaciones</p>
-      <div className="grid-2">
-        {DENOMS.map(d => (
-          <div key={d} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-soft)', borderRadius: 8, padding: '6px 10px' }}>
-            <span style={{ fontSize: 12, fontWeight: 600, minWidth: 44 }}>Bs {d}</span>
-            <input type="text" inputMode="numeric"
-              value={value[d] === undefined || value[d] === 0 ? '' : value[d]}
-              onChange={e => {
-                const raw = e.target.value.replace(/[^0-9]/g, '')
-                const nuevo = { ...value }
-                if (raw === '') delete nuevo[d]; else nuevo[d] = Number(raw)
-                onChange(nuevo)
-              }}
-              placeholder="0"
-              style={{ width: '100%', minWidth: 0, border: '1px solid var(--silver-light)', borderRadius: 6, padding: '4px 8px', fontSize: 13 }} />
-            <span style={{ fontSize: 11, color: 'var(--text-soft)', minWidth: 52, textAlign: 'right' }}>= Bs {((value[d] ?? 0) * d).toFixed(2)}</span>
-          </div>
-        ))}
-      </div>
+    <div className={compact ? 'grid-2' : 'grid-2'} style={{ gap: 6 }}>
+      {DENOMS.map(d => (
+        <div key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg-soft)', borderRadius: 8, padding: '5px 10px' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, minWidth: 48 }}>Bs {d}</span>
+          <input type="text" inputMode="numeric"
+            value={value[d] === undefined || value[d] === 0 ? '' : value[d]}
+            onChange={e => {
+              const raw = e.target.value.replace(/[^0-9]/g, '')
+              const n = { ...value }
+              if (raw === '') delete n[d]; else n[d] = Number(raw)
+              onChange(n)
+            }}
+            placeholder="0"
+            style={{ width: '100%', border: '1px solid var(--silver-light)', borderRadius: 6, padding: '4px 8px', fontSize: 13 }} />
+          <span style={{ fontSize: 11, color: 'var(--text-soft)', minWidth: 48, textAlign: 'right' }}>
+            {((value[d] ?? 0) * d).toFixed(2)}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
 
-function totalDenoms(denoms) { return DENOMS.reduce((s, d) => s + (denoms[d] ?? 0) * d, 0) }
+function ResumenTurno({ sesion, movimientos, gastos }) {
+  const ef = movimientos.filter(m => m.tipo !== 'gasto' && m.medio_pago === 'efectivo').reduce((s, m) => s + Number(m.monto), 0)
+  const qr = movimientos.filter(m => m.tipo !== 'gasto' && m.medio_pago === 'qr').reduce((s, m) => s + Number(m.monto), 0)
+  const tr = movimientos.filter(m => m.tipo !== 'gasto' && m.medio_pago === 'transferencia').reduce((s, m) => s + Number(m.monto), 0)
+  const gasto = gastos.reduce((s, g) => s + Number(g.monto), 0)
+  const total = ef + qr + tr
+  const panesPend = Number(sesion.total_pan_inicial ?? 0)
+
+  return (
+    <div className="grid-2" style={{ gap: 12 }}>
+      {[['Ventas efectivo', `Bs ${ef.toFixed(2)}`, 'ok'], ['Ventas QR', `Bs ${qr.toFixed(2)}`, 'info'], ['Total ventas', `Bs ${total.toFixed(2)}`, 'ok'], ['Gastos', `Bs ${gasto.toFixed(2)}`, 'err']].map(([l, v, t]) => (
+        <div key={l} className="card" style={{ padding: '12px 16px' }}>
+          <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>{l}</p>
+          <p style={{ fontSize: 18, fontWeight: 700 }}>{v}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export default function Caja() {
   const toast = useToast()
   const [sesion, setSesion] = useState(null)
+  const [sesionAnterior, setSesionAnterior] = useState(null)
   const [movimientos, setMovimientos] = useState([])
+  const [gastos, setGastos] = useState([])
   const [loading, setLoading] = useState(true)
-  const [modalApertura, setModalApertura] = useState(false)
-  const [modalCierre, setModalCierre] = useState(false)
-  const [denomApertura, setDenomApertura] = useState({})
+  const [step, setStep] = useState('idle') // idle | apertura | cierre
+
+  // Apertura
+  const [denom, setDenom] = useState({})
+  const [cajasPan, setCajasPan] = useState(0)
+  const [panesCaja, setPanesCaja] = useState(90)
+  const [panSobrAnterior, setPanSobrAnterior] = useState(0)
+  const [tipoTurno, setTipoTurno] = useState('manana')
+
+  // Cierre
   const [denomCierre, setDenomCierre] = useState({})
+  const [panSobrCierre, setPanSobrCierre] = useState(0)
+  const [perdidasMonto, setPerdidasMonto] = useState(0)
+  const [perdidasNota, setPerdidasNota] = useState('')
 
   useEffect(() => { fetchSesion() }, [])
 
   async function fetchSesion() {
-    const { data: s } = await supabase.from('caja_sesiones').select('*, profiles!usuario_apertura_id(full_name)').eq('estado', 'abierta').limit(1).maybeSingle()
+    setLoading(true)
+    const { data: s } = await supabase.from('caja_sesiones')
+      .select('*, profiles!usuario_apertura_id(full_name)')
+      .eq('estado', 'abierta').limit(1).maybeSingle()
+
     setSesion(s)
+
     if (s) {
-      const { data: movs } = await supabase.from('caja_movimientos').select('*').eq('caja_sesion_id', s.id).order('fecha', { ascending: false })
+      const [{ data: movs }, { data: g }] = await Promise.all([
+        supabase.from('caja_movimientos').select('*').eq('caja_sesion_id', s.id).order('fecha', { ascending: false }),
+        supabase.from('gastos').select('*').eq('caja_sesion_id', s.id),
+      ])
       setMovimientos(movs ?? [])
+      setGastos(g ?? [])
+
+      if (s.sesion_anterior_id) {
+        const { data: ant } = await supabase.from('caja_sesiones').select('*').eq('id', s.sesion_anterior_id).single()
+        setSesionAnterior(ant)
+      }
+    } else {
+      // Buscar última sesión cerrada del día para el pan sobrante
+      const hoy = new Date().toISOString().split('T')[0]
+      const { data: ultima } = await supabase.from('caja_sesiones')
+        .select('*').eq('estado', 'cerrada').gte('fecha_apertura', hoy)
+        .order('fecha_cierre', { ascending: false }).limit(1).maybeSingle()
+
+      if (ultima) {
+        setSesionAnterior(ultima)
+        // Pre-cargar turno sugerido y pan sobrante
+        if (ultima.tipo_turno === 'manana') {
+          setTipoTurno('tarde')
+          setPanSobrAnterior(ultima.pan_sobrante_cierre ?? 0)
+          setCajasPan(0)
+        } else {
+          setTipoTurno('manana')
+          // Pan sobrante del día anterior
+          const ayer = new Date(); ayer.setDate(ayer.getDate() - 1)
+          const ayerStr = ayer.toISOString().split('T')[0]
+          const { data: ult2 } = await supabase.from('caja_sesiones')
+            .select('pan_sobrante_cierre').eq('estado', 'cerrada').gte('fecha_apertura', ayerStr)
+            .lte('fecha_apertura', `${ayerStr}T23:59:59`)
+            .order('fecha_cierre', { ascending: false }).limit(1).maybeSingle()
+          setPanSobrAnterior(ult2?.pan_sobrante_cierre ?? 0)
+        }
+      } else {
+        setTipoTurno('manana')
+      }
     }
     setLoading(false)
   }
 
   async function abrirCaja() {
-    const monto = totalDenoms(denomApertura)
-    const { error } = await supabase.rpc('abrir_caja', { p_monto: monto, p_denominaciones: denomApertura })
+    const monto = totalDenoms(denom)
+    if (monto < 200) { toast('El fondo mínimo es Bs 200', 'warn'); return }
+    const totalPan = (cajasPan * panesCaja) + panSobrAnterior
+    const { error } = await supabase.rpc('abrir_caja', {
+      p_monto: monto, p_denominaciones: denom,
+      p_tipo_turno: tipoTurno,
+      p_cajas_pan: cajasPan, p_panes_por_caja: panesCaja,
+      p_pan_sobrante_anterior: panSobrAnterior,
+      p_sesion_anterior_id: sesionAnterior?.id ?? null,
+    })
     if (error) { toast(error.message, 'err'); return }
-    toast(`Caja abierta con Bs ${monto.toFixed(2)}`, 'ok')
-    setModalApertura(false); setDenomApertura({})
+    toast(`Turno ${tipoTurno} iniciado — ${totalPan} panes`, 'ok')
+    setStep('idle'); setDenom({})
     fetchSesion()
   }
 
   async function cerrarCaja() {
     const montoFisico = totalDenoms(denomCierre)
-    const { error } = await supabase.rpc('cerrar_caja', { p_caja_sesion_id: sesion.id, p_monto_fisico: montoFisico, p_denominaciones: denomCierre })
+    const { error } = await supabase.rpc('cerrar_caja', {
+      p_caja_sesion_id: sesion.id,
+      p_monto_fisico: montoFisico, p_denominaciones: denomCierre,
+      p_pan_sobrante_cierre: panSobrCierre,
+      p_perdidas_monto: perdidasMonto,
+      p_perdidas_nota: perdidasNota,
+    })
     if (error) { toast(error.message, 'err'); return }
-    toast('Caja cerrada correctamente', 'ok')
-    setModalCierre(false); setDenomCierre({})
+    toast('Turno cerrado', 'ok')
+    setStep('idle'); setDenomCierre({}); setPanSobrCierre(0); setPerdidasMonto(0); setPerdidasNota('')
     fetchSesion()
   }
 
   if (loading) return <div className="page-wrap" style={{ color: 'var(--text-soft)' }}>Cargando caja...</div>
 
-  const totalEfectivo = movimientos.filter(m => m.tipo === 'venta' && m.medio_pago === 'efectivo').reduce((s, m) => s + Number(m.monto), 0)
-  const totalQR = movimientos.filter(m => m.tipo === 'venta' && m.medio_pago === 'qr').reduce((s, m) => s + Number(m.monto), 0)
-  const totalTransfer = movimientos.filter(m => m.tipo === 'venta' && m.medio_pago === 'transferencia').reduce((s, m) => s + Number(m.monto), 0)
-  const totalGastos = movimientos.filter(m => m.tipo === 'gasto').reduce((s, m) => s + Number(m.monto), 0)
+  const panVendido = sesion ? Math.abs(movimientos.filter(m => m.tipo === 'venta' || m.tipo === 'reserva').length) : 0
+  // Calcular panes vendidos del día desde inventario_movimientos sería más preciso, pero usamos la caja
+  const totalPanInicial = Number(sesion?.total_pan_inicial ?? 0)
+  const ef = movimientos.filter(m => m.medio_pago === 'efectivo' && m.tipo !== 'gasto').reduce((s, m) => s + Number(m.monto), 0)
+  const qr = movimientos.filter(m => m.medio_pago === 'qr').reduce((s, m) => s + Number(m.monto), 0)
+  const gastoTotal = gastos.reduce((s, g) => s + Number(g.monto), 0)
+  const totalVentas = ef + qr
+  const cajaTeórica = Number(sesion?.monto_apertura ?? 0) + ef - gastoTotal
+  const diferenciaCierre = totalDenoms(denomCierre) - cajaTeórica
 
   return (
     <div className="page-wrap">
       <div className="toolbar-wrap" style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, flex: 1, minWidth: 100 }}>Caja</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 700, flex: 1 }}>Caja</h2>
         {sesion
-          ? <button className="btn-danger" onClick={() => setModalCierre(true)}>Cerrar caja</button>
-          : <button className="btn-primary" onClick={() => setModalApertura(true)}>Abrir caja</button>}
+          ? <button className="btn-danger" onClick={() => setStep('cierre')}>Cerrar turno</button>
+          : <button className="btn-primary" onClick={() => setStep('apertura')}>Iniciar turno</button>}
       </div>
 
-      {!sesion ? (
+      {/* ─── SIN SESIÓN ─── */}
+      {!sesion && step === 'idle' && (
         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🏦</div>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Caja cerrada</h3>
-          <p style={{ color: 'var(--text-soft)', marginBottom: 20 }}>No hay una sesión de caja activa. Abre la caja para comenzar el turno.</p>
-          <button className="btn-primary" onClick={() => setModalApertura(true)} style={{ padding: '12px 28px' }}>Abrir caja del día</button>
-        </div>
-      ) : (
-        <>
-          <div style={{ background: 'var(--ok-bg)', borderLeft: '4px solid var(--ok)', borderRadius: 10, padding: '12px 16px', marginBottom: 22, fontSize: 13, color: 'var(--ok)' }}>
-            ✓ <strong>Caja abierta</strong> por {sesion.profiles?.full_name} — desde {new Date(sesion.fecha_apertura).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })} — Fondo inicial: <strong>Bs {Number(sesion.monto_apertura).toFixed(2)}</strong>
-          </div>
-
-          <div className="grid-4" style={{ marginBottom: 24 }}>
-            {[['Efectivo', totalEfectivo], ['QR', totalQR], ['Transferencia', totalTransfer], ['Gastos', totalGastos]].map(([l, v]) => (
-              <div key={l} className="card" style={{ padding: '14px 18px' }}>
-                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>{l}</p>
-                <p style={{ fontSize: 22, fontWeight: 700 }}>Bs {Number(v).toFixed(2)}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="card" style={{ overflow: 'hidden' }}>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--silver-light)' }}>
-              <h3 style={{ fontSize: 15, fontWeight: 700 }}>Movimientos de la sesión</h3>
+          <div style={{ fontSize: 52, marginBottom: 16 }}>🏦</div>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Sin turno activo</h3>
+          {sesionAnterior && (
+            <div style={{ background: 'var(--info-bg)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, fontSize: 13 }}>
+              <strong>Turno {sesionAnterior.tipo_turno} cerrado</strong> — Pan sobrante: <strong>{sesionAnterior.pan_sobrante_cierre ?? 0} panes</strong>
             </div>
+          )}
+          <button className="btn-primary" onClick={() => setStep('apertura')} style={{ padding: '14px 32px', fontSize: 16 }}>
+            Iniciar turno {tipoTurno === 'manana' ? '☀️ mañana' : '🌙 tarde'}
+          </button>
+        </div>
+      )}
+
+      {/* ─── SESIÓN ACTIVA ─── */}
+      {sesion && step === 'idle' && (
+        <>
+          <div style={{ background: 'var(--ok-bg)', borderLeft: '4px solid var(--ok)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--ok)' }}>
+            ✓ <strong>Turno {sesion.tipo_turno === 'manana' ? '☀️ mañana' : '🌙 tarde'} activo</strong> — desde {new Date(sesion.fecha_apertura).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })} — Fondo: <strong>Bs {Number(sesion.monto_apertura).toFixed(2)}</strong>
+          </div>
+
+          {/* Resumen pan */}
+          <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>🍞 Pan del turno</h3>
+            <div className="grid-3" style={{ gap: 12 }}>
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>Inicial</p>
+                <p style={{ fontSize: 28, fontWeight: 900 }}>{totalPanInicial}</p>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>{sesion.cajas_pan} cajas × {sesion.panes_por_caja} + {sesion.pan_sobrante_anterior} sob.</p>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>Vendido</p>
+                <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--ok)' }}>{movimientos.filter(m => m.tipo === 'venta' || m.tipo === 'reserva').length > 0 ? '—' : 0}</p>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>Ver inventario</p>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>Caja actual</p>
+                <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--info)' }}>Bs {cajaTeórica.toFixed(2)}</p>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>teórica</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Resumen ventas */}
+          <ResumenTurno sesion={sesion} movimientos={movimientos} gastos={gastos} />
+
+          {/* Movimientos */}
+          <div className="card" style={{ overflow: 'hidden', marginTop: 20 }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--silver-light)', fontWeight: 700 }}>Movimientos del turno</div>
             <div className="table-scroll">
               <table className="clap-table">
                 <thead><tr><th>Hora</th><th>Tipo</th><th>Medio</th><th>Monto</th></tr></thead>
@@ -136,46 +253,125 @@ export default function Caja() {
         </>
       )}
 
-      <Modal open={modalApertura} onClose={() => setModalApertura(false)} title="Apertura de caja">
-        <div style={{ marginBottom: 16, background: 'var(--yellow-soft)', borderRadius: 10, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontWeight: 600 }}>Fondo inicial</span>
-          <span style={{ fontSize: 20, fontWeight: 700 }}>Bs {totalDenoms(denomApertura).toFixed(2)}</span>
+      {/* ─── MODAL APERTURA ─── */}
+      <Modal open={step === 'apertura'} onClose={() => setStep('idle')} title={`Iniciar turno ${tipoTurno === 'manana' ? '☀️ mañana' : '🌙 tarde'}`}>
+        {/* Tipo de turno */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+          {[['manana','☀️ Turno mañana'], ['tarde','🌙 Turno tarde']].map(([k, l]) => (
+            <button key={k} onClick={() => setTipoTurno(k)}
+              style={{ padding: '12px', borderRadius: 10, border: `2px solid ${tipoTurno === k ? 'var(--yellow-dark)' : 'var(--silver-light)'}`, background: tipoTurno === k ? 'var(--yellow-soft)' : '#fff', fontWeight: 700, cursor: 'pointer' }}>
+              {l}
+            </button>
+          ))}
         </div>
-        <DenomInput value={denomApertura} onChange={setDenomApertura} />
-        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-          <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setModalApertura(false)}>Cancelar</button>
-          <button className="btn-primary" style={{ flex: 1 }} disabled={totalDenoms(denomApertura) <= 0} onClick={abrirCaja}>Abrir caja</button>
+
+        {/* Pan */}
+        <div className="card" style={{ padding: 16, marginBottom: 20 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>🍞 Registro de pan</p>
+          {panSobrAnterior > 0 && (
+            <div style={{ background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 8, padding: '8px 12px', marginBottom: 12, fontSize: 13 }}>
+              📦 Pan sobrante de ayer/turno anterior: <strong>{panSobrAnterior} panes</strong>
+            </div>
+          )}
+          <div className="grid-3" style={{ gap: 10, marginBottom: 12 }}>
+            <div>
+              <label className="form-label">Cajas nuevas</label>
+              <input className="form-input" type="number" value={cajasPan} onChange={e => setCajasPan(+e.target.value)} style={{ textAlign: 'center', fontWeight: 700 }} />
+            </div>
+            <div>
+              <label className="form-label">Panes/caja</label>
+              <input className="form-input" type="number" value={panesCaja} onChange={e => setPanesCaja(+e.target.value)} style={{ textAlign: 'center', fontWeight: 700 }} />
+            </div>
+            <div>
+              <label className="form-label">Pan de ayer</label>
+              <input className="form-input" type="number" value={panSobrAnterior} onChange={e => setPanSobrAnterior(+e.target.value)} style={{ textAlign: 'center', fontWeight: 700 }} />
+            </div>
+          </div>
+          <div style={{ background: 'var(--yellow-soft)', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 16 }}>
+            <span>Total panes al iniciar</span>
+            <span>{cajasPan * panesCaja + panSobrAnterior} panes</span>
+          </div>
+        </div>
+
+        {/* Denominaciones */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+            <p style={{ fontSize: 13, fontWeight: 700 }}>💰 Conteo de caja</p>
+            <span style={{ fontSize: 16, fontWeight: 800, color: totalDenoms(denom) >= 200 ? 'var(--ok)' : 'var(--err)' }}>
+              Bs {totalDenoms(denom).toFixed(2)}
+            </span>
+          </div>
+          {totalDenoms(denom) < 200 && <p style={{ fontSize: 12, color: 'var(--err)', marginBottom: 8 }}>Mínimo requerido: Bs 200</p>}
+          <DenomInput value={denom} onChange={setDenom} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setStep('idle')}>Cancelar</button>
+          <button className="btn-primary" style={{ flex: 1 }} disabled={totalDenoms(denom) < 200} onClick={abrirCaja}>
+            Iniciar turno
+          </button>
         </div>
       </Modal>
 
-      <Modal open={modalCierre} onClose={() => setModalCierre(false)} title="Cierre y arqueo de caja">
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ background: 'var(--bg-soft)', borderRadius: 10, padding: '12px 14px', marginBottom: 10, fontSize: 13 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Fondo inicial</span><span>Bs {Number(sesion?.monto_apertura ?? 0).toFixed(2)}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Ventas efectivo</span><span>Bs {totalEfectivo.toFixed(2)}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Gastos</span><span style={{ color: 'var(--err)' }}>- Bs {totalGastos.toFixed(2)}</span></div>
-            <div style={{ borderTop: '1px solid var(--silver)', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
-              <span>Caja teórica</span><span>Bs {(Number(sesion?.monto_apertura ?? 0) + totalEfectivo - totalGastos).toFixed(2)}</span>
-            </div>
+      {/* ─── MODAL CIERRE ─── */}
+      <Modal open={step === 'cierre'} onClose={() => setStep('idle')} title={`Cerrar turno ${sesion?.tipo_turno === 'manana' ? '☀️ mañana' : '🌙 tarde'}`}>
+        {/* Resumen antes del cierre */}
+        <div style={{ background: 'var(--bg-soft)', borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 13 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Fondo inicial</span><span>Bs {Number(sesion?.monto_apertura ?? 0).toFixed(2)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Ventas efectivo</span><span>Bs {ef.toFixed(2)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Ventas QR</span><span>Bs {qr.toFixed(2)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: 'var(--err)' }}><span>Gastos</span><span>- Bs {gastoTotal.toFixed(2)}</span></div>
+          <div style={{ borderTop: '1px solid var(--silver)', paddingTop: 8, marginTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 15 }}>
+            <span>Caja teórica</span><span>Bs {cajaTeórica.toFixed(2)}</span>
           </div>
-          <div style={{ background: 'var(--yellow-soft)', borderRadius: 10, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <span style={{ fontWeight: 600 }}>Caja física (conteo)</span>
-            <span style={{ fontSize: 20, fontWeight: 700 }}>Bs {totalDenoms(denomCierre).toFixed(2)}</span>
-          </div>
-          {totalDenoms(denomCierre) > 0 && (() => {
-            const teorico = Number(sesion?.monto_apertura ?? 0) + totalEfectivo - totalGastos
-            const diferencia = totalDenoms(denomCierre) - teorico
-            return (
-              <div style={{ background: diferencia < 0 ? 'var(--err-bg)' : 'var(--ok-bg)', color: diferencia < 0 ? 'var(--err)' : 'var(--ok)', borderRadius: 8, padding: '8px 14px', fontSize: 14, fontWeight: 700, textAlign: 'center', marginBottom: 14 }}>
-                Diferencia: {diferencia >= 0 ? '+' : ''}Bs {diferencia.toFixed(2)}
-              </div>
-            )
-          })()}
         </div>
-        <DenomInput value={denomCierre} onChange={setDenomCierre} />
-        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-          <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setModalCierre(false)}>Cancelar</button>
-          <button className="btn-primary" style={{ flex: 1 }} disabled={totalDenoms(denomCierre) <= 0} onClick={cerrarCaja}>Confirmar cierre</button>
+
+        {/* Pan sobrante */}
+        <div className="card" style={{ padding: 14, marginBottom: 14 }}>
+          <label className="form-label">🍞 Panes sobrantes al cerrar</label>
+          <input className="form-input" type="number" value={panSobrCierre} onChange={e => setPanSobrCierre(+e.target.value)}
+            style={{ textAlign: 'center', fontWeight: 700, fontSize: 20 }} placeholder="0" />
+          <p style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 6 }}>
+            {sesion?.tipo_turno === 'tarde' ? 'Estos panes pasarán al turno mañana del próximo día' : 'Pasarán al turno tarde de hoy'}
+          </p>
+        </div>
+
+        {/* Pérdidas */}
+        <div className="card" style={{ padding: 14, marginBottom: 14, borderLeft: '3px solid var(--err)' }}>
+          <label className="form-label">⚠ ¿Hubo pérdidas? (opcional)</label>
+          <input className="form-input" type="number" value={perdidasMonto || ''} onChange={e => setPerdidasMonto(+e.target.value)} placeholder="Monto en Bs" style={{ marginBottom: 8 }} />
+          <input className="form-input" value={perdidasNota} onChange={e => setPerdidasNota(e.target.value)} placeholder="Descripción de la pérdida" />
+        </div>
+
+        {/* Conteo físico */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+            <p style={{ fontSize: 13, fontWeight: 700 }}>💰 Conteo físico de caja</p>
+            <span style={{ fontSize: 16, fontWeight: 800 }}>Bs {totalDenoms(denomCierre).toFixed(2)}</span>
+          </div>
+          <DenomInput value={denomCierre} onChange={setDenomCierre} />
+        </div>
+
+        {totalDenoms(denomCierre) > 0 && (
+          <div style={{ background: diferenciaCierre < 0 ? 'var(--err-bg)' : 'var(--ok-bg)', color: diferenciaCierre < 0 ? 'var(--err)' : 'var(--ok)', borderRadius: 10, padding: '10px 14px', fontWeight: 800, fontSize: 16, textAlign: 'center', marginBottom: 14 }}>
+            Diferencia: {diferenciaCierre >= 0 ? '+' : ''}Bs {diferenciaCierre.toFixed(2)}
+          </div>
+        )}
+
+        {/* Resumen turno anterior si es tarde */}
+        {sesion?.tipo_turno === 'tarde' && sesionAnterior && (
+          <div style={{ background: 'var(--info-bg)', borderRadius: 10, padding: 14, marginBottom: 14, fontSize: 13 }}>
+            <p style={{ fontWeight: 700, marginBottom: 8 }}>☀️ Resumen turno mañana</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}><span>Total ventas</span><span>Bs {Number(sesionAnterior.resumen_turno?.total_ventas ?? 0).toFixed(2)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Pan sobrante</span><span>{sesionAnterior.pan_sobrante_cierre ?? 0} panes</span></div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setStep('idle')}>Cancelar</button>
+          <button className="btn-primary" style={{ flex: 1 }} disabled={totalDenoms(denomCierre) <= 0} onClick={cerrarCaja}>
+            Confirmar cierre
+          </button>
         </div>
       </Modal>
     </div>
