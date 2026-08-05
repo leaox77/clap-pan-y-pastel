@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useToast } from '../context/ToastContext'
+import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
 
 const DENOMS = [200, 100, 50, 20, 10, 5, 2, 1, 0.50, 0.20, 0.10]
 
 function totalDenoms(d) { return DENOMS.reduce((s, k) => s + (d[k] ?? 0) * k, 0) }
 
-function DenomInput({ value, onChange, compact = false }) {
+function DenomInput({ value, onChange }) {
   return (
-    <div className={compact ? 'grid-2' : 'grid-2'} style={{ gap: 6 }}>
+    <div className="grid-2" style={{ gap: 6 }}>
       {DENOMS.map(d => (
-        <div key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg-soft)', borderRadius: 8, padding: '5px 10px' }}>
+        <div key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg-soft)', borderRadius: 8, padding: '6px 10px' }}>
           <span style={{ fontSize: 12, fontWeight: 600, minWidth: 48 }}>Bs {d}</span>
           <input type="text" inputMode="numeric"
             value={value[d] === undefined || value[d] === 0 ? '' : value[d]}
@@ -22,8 +23,8 @@ function DenomInput({ value, onChange, compact = false }) {
               onChange(n)
             }}
             placeholder="0"
-            style={{ width: '100%', border: '1px solid var(--silver-light)', borderRadius: 6, padding: '4px 8px', fontSize: 13 }} />
-          <span style={{ fontSize: 11, color: 'var(--text-soft)', minWidth: 48, textAlign: 'right' }}>
+            style={{ width: '100%', border: '1px solid var(--silver-light)', borderRadius: 6, padding: '5px 8px', fontSize: 13 }} />
+          <span style={{ fontSize: 11, color: 'var(--text-soft)', minWidth: 52, textAlign: 'right' }}>
             {((value[d] ?? 0) * d).toFixed(2)}
           </span>
         </div>
@@ -32,34 +33,17 @@ function DenomInput({ value, onChange, compact = false }) {
   )
 }
 
-function ResumenTurno({ sesion, movimientos, gastos }) {
-  const ef = movimientos.filter(m => m.tipo !== 'gasto' && m.medio_pago === 'efectivo').reduce((s, m) => s + Number(m.monto), 0)
-  const qr = movimientos.filter(m => m.tipo !== 'gasto' && m.medio_pago === 'qr').reduce((s, m) => s + Number(m.monto), 0)
-  const tr = movimientos.filter(m => m.tipo !== 'gasto' && m.medio_pago === 'transferencia').reduce((s, m) => s + Number(m.monto), 0)
-  const gasto = gastos.reduce((s, g) => s + Number(g.monto), 0)
-  const total = ef + qr + tr
-  const panesPend = Number(sesion.total_pan_inicial ?? 0)
-
-  return (
-    <div className="grid-2" style={{ gap: 12 }}>
-      {[['Ventas efectivo', `Bs ${ef.toFixed(2)}`, 'ok'], ['Ventas QR', `Bs ${qr.toFixed(2)}`, 'info'], ['Total ventas', `Bs ${total.toFixed(2)}`, 'ok'], ['Gastos', `Bs ${gasto.toFixed(2)}`, 'err']].map(([l, v, t]) => (
-        <div key={l} className="card" style={{ padding: '12px 16px' }}>
-          <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>{l}</p>
-          <p style={{ fontSize: 18, fontWeight: 700 }}>{v}</p>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 export default function Caja() {
   const toast = useToast()
+  const { role } = useAuth()
+  const esAdmin = ['administrador', 'propietaria'].includes(role)
+
   const [sesion, setSesion] = useState(null)
   const [sesionAnterior, setSesionAnterior] = useState(null)
   const [movimientos, setMovimientos] = useState([])
   const [gastos, setGastos] = useState([])
   const [loading, setLoading] = useState(true)
-  const [step, setStep] = useState('idle') // idle | apertura | cierre
+  const [step, setStep] = useState('idle') // idle | apertura | cierre | ajuste
 
   // Apertura
   const [denom, setDenom] = useState({})
@@ -74,11 +58,16 @@ export default function Caja() {
   const [perdidasMonto, setPerdidasMonto] = useState(0)
   const [perdidasNota, setPerdidasNota] = useState('')
 
+  // Ajuste de fondo
+  const [denomAjuste, setDenomAjuste] = useState({})
+  const [motivoAjuste, setMotivoAjuste] = useState('')
+
   useEffect(() => { fetchSesion() }, [])
 
   async function fetchSesion() {
     setLoading(true)
-    const { data: s } = await supabase.from('caja_sesiones')
+    const { data: s } = await supabase
+      .from('caja_sesiones')
       .select('*, profiles!usuario_apertura_id(full_name)')
       .eq('estado', 'abierta').limit(1).maybeSingle()
 
@@ -95,17 +84,19 @@ export default function Caja() {
       if (s.sesion_anterior_id) {
         const { data: ant } = await supabase.from('caja_sesiones').select('*').eq('id', s.sesion_anterior_id).single()
         setSesionAnterior(ant)
+      } else {
+        setSesionAnterior(null)
       }
     } else {
-      // Buscar última sesión cerrada del día para el pan sobrante
+      // Buscar última sesión cerrada para pre-cargar datos
       const hoy = new Date().toISOString().split('T')[0]
-      const { data: ultima } = await supabase.from('caja_sesiones')
-        .select('*').eq('estado', 'cerrada').gte('fecha_apertura', hoy)
+      const { data: ultima } = await supabase
+        .from('caja_sesiones').select('*').eq('estado', 'cerrada')
+        .gte('fecha_apertura', hoy)
         .order('fecha_cierre', { ascending: false }).limit(1).maybeSingle()
 
       if (ultima) {
         setSesionAnterior(ultima)
-        // Pre-cargar turno sugerido y pan sobrante
         if (ultima.tipo_turno === 'manana') {
           setTipoTurno('tarde')
           setPanSobrAnterior(ultima.pan_sobrante_cierre ?? 0)
@@ -115,14 +106,16 @@ export default function Caja() {
           // Pan sobrante del día anterior
           const ayer = new Date(); ayer.setDate(ayer.getDate() - 1)
           const ayerStr = ayer.toISOString().split('T')[0]
-          const { data: ult2 } = await supabase.from('caja_sesiones')
-            .select('pan_sobrante_cierre').eq('estado', 'cerrada').gte('fecha_apertura', ayerStr)
-            .lte('fecha_apertura', `${ayerStr}T23:59:59`)
+          const { data: ult2 } = await supabase
+            .from('caja_sesiones').select('pan_sobrante_cierre')
+            .eq('estado', 'cerrada')
+            .gte('fecha_apertura', ayerStr).lte('fecha_apertura', `${ayerStr}T23:59:59`)
             .order('fecha_cierre', { ascending: false }).limit(1).maybeSingle()
           setPanSobrAnterior(ult2?.pan_sobrante_cierre ?? 0)
         }
       } else {
         setTipoTurno('manana')
+        setPanSobrAnterior(0)
       }
     }
     setLoading(false)
@@ -131,7 +124,6 @@ export default function Caja() {
   async function abrirCaja() {
     const monto = totalDenoms(denom)
     if (monto < 200) { toast('El fondo mínimo es Bs 200', 'warn'); return }
-    const totalPan = (cajasPan * panesCaja) + panSobrAnterior
     const { error } = await supabase.rpc('abrir_caja', {
       p_monto: monto, p_denominaciones: denom,
       p_tipo_turno: tipoTurno,
@@ -140,7 +132,8 @@ export default function Caja() {
       p_sesion_anterior_id: sesionAnterior?.id ?? null,
     })
     if (error) { toast(error.message, 'err'); return }
-    toast(`Turno ${tipoTurno} iniciado — ${totalPan} panes`, 'ok')
+    const totalPan = cajasPan * panesCaja + panSobrAnterior
+    toast(`Turno ${tipoTurno === 'manana' ? 'mañana' : 'tarde'} iniciado — ${totalPan} panes`, 'ok')
     setStep('idle'); setDenom({})
     fetchSesion()
   }
@@ -155,30 +148,57 @@ export default function Caja() {
       p_perdidas_nota: perdidasNota,
     })
     if (error) { toast(error.message, 'err'); return }
-    toast('Turno cerrado', 'ok')
-    setStep('idle'); setDenomCierre({}); setPanSobrCierre(0); setPerdidasMonto(0); setPerdidasNota('')
+    toast('Turno cerrado correctamente', 'ok')
+    setStep('idle')
+    setDenomCierre({}); setPanSobrCierre(0); setPerdidasMonto(0); setPerdidasNota('')
+    fetchSesion()
+  }
+
+  async function ajustarFondo() {
+    const nuevoMonto = totalDenoms(denomAjuste)
+    if (nuevoMonto <= 0) { toast('Ingresa el conteo', 'warn'); return }
+    if (!motivoAjuste) { toast('Ingresa el motivo', 'warn'); return }
+    const { error } = await supabase.rpc('ajustar_fondo_caja', {
+      p_caja_sesion_id: sesion.id,
+      p_nuevo_monto: nuevoMonto,
+      p_denominaciones: denomAjuste,
+      p_motivo: motivoAjuste,
+    })
+    if (error) { toast(error.message, 'err'); return }
+    toast('Fondo ajustado correctamente', 'ok')
+    setStep('idle'); setDenomAjuste({}); setMotivoAjuste('')
     fetchSesion()
   }
 
   if (loading) return <div className="page-wrap" style={{ color: 'var(--text-soft)' }}>Cargando caja...</div>
 
-  const panVendido = sesion ? Math.abs(movimientos.filter(m => m.tipo === 'venta' || m.tipo === 'reserva').length) : 0
-  // Calcular panes vendidos del día desde inventario_movimientos sería más preciso, pero usamos la caja
-  const totalPanInicial = Number(sesion?.total_pan_inicial ?? 0)
-  const ef = movimientos.filter(m => m.medio_pago === 'efectivo' && m.tipo !== 'gasto').reduce((s, m) => s + Number(m.monto), 0)
-  const qr = movimientos.filter(m => m.medio_pago === 'qr').reduce((s, m) => s + Number(m.monto), 0)
+  // Cálculos
+  const ef = movimientos.filter(m => ['venta','reserva'].includes(m.tipo) && m.medio_pago === 'efectivo').reduce((s, m) => s + Number(m.monto), 0)
+  const qr = movimientos.filter(m => ['venta','reserva'].includes(m.tipo) && m.medio_pago === 'qr').reduce((s, m) => s + Number(m.monto), 0)
+  const tr = movimientos.filter(m => ['venta','reserva'].includes(m.tipo) && m.medio_pago === 'transferencia').reduce((s, m) => s + Number(m.monto), 0)
   const gastoTotal = gastos.reduce((s, g) => s + Number(g.monto), 0)
-  const totalVentas = ef + qr
+  const totalVentas = ef + qr + tr
   const cajaTeórica = Number(sesion?.monto_apertura ?? 0) + ef - gastoTotal
   const diferenciaCierre = totalDenoms(denomCierre) - cajaTeórica
+  const totalPanInicial = Number(sesion?.total_pan_inicial ?? 0)
 
   return (
     <div className="page-wrap">
+      {/* Toolbar */}
       <div className="toolbar-wrap" style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, flex: 1 }}>Caja</h2>
-        {sesion
-          ? <button className="btn-danger" onClick={() => setStep('cierre')}>Cerrar turno</button>
-          : <button className="btn-primary" onClick={() => setStep('apertura')}>Iniciar turno</button>}
+        {sesion ? (
+          <>
+            {esAdmin && (
+              <button className="btn-secondary" onClick={() => setStep('ajuste')} style={{ fontSize: 13 }}>
+                ⚙ Ajustar fondo
+              </button>
+            )}
+            <button className="btn-danger" onClick={() => setStep('cierre')}>Cerrar turno</button>
+          </>
+        ) : (
+          <button className="btn-primary" onClick={() => setStep('apertura')}>Iniciar turno</button>
+        )}
       </div>
 
       {/* ─── SIN SESIÓN ─── */}
@@ -187,12 +207,15 @@ export default function Caja() {
           <div style={{ fontSize: 52, marginBottom: 16 }}>🏦</div>
           <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Sin turno activo</h3>
           {sesionAnterior && (
-            <div style={{ background: 'var(--info-bg)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, fontSize: 13 }}>
-              <strong>Turno {sesionAnterior.tipo_turno} cerrado</strong> — Pan sobrante: <strong>{sesionAnterior.pan_sobrante_cierre ?? 0} panes</strong>
+            <div style={{ background: 'var(--info-bg)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--info)' }}>
+              <strong>Último turno ({sesionAnterior.tipo_turno}):</strong> pan sobrante <strong>{sesionAnterior.pan_sobrante_cierre ?? 0} panes</strong>
             </div>
           )}
+          <p style={{ color: 'var(--text-soft)', marginBottom: 20, fontSize: 14 }}>
+            Próximo turno sugerido: <strong>{tipoTurno === 'manana' ? '☀️ Mañana' : '🌙 Tarde'}</strong>
+          </p>
           <button className="btn-primary" onClick={() => setStep('apertura')} style={{ padding: '14px 32px', fontSize: 16 }}>
-            Iniciar turno {tipoTurno === 'manana' ? '☀️ mañana' : '🌙 tarde'}
+            Iniciar turno
           </button>
         </div>
       )}
@@ -200,48 +223,82 @@ export default function Caja() {
       {/* ─── SESIÓN ACTIVA ─── */}
       {sesion && step === 'idle' && (
         <>
-          <div style={{ background: 'var(--ok-bg)', borderLeft: '4px solid var(--ok)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--ok)' }}>
-            ✓ <strong>Turno {sesion.tipo_turno === 'manana' ? '☀️ mañana' : '🌙 tarde'} activo</strong> — desde {new Date(sesion.fecha_apertura).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })} — Fondo: <strong>Bs {Number(sesion.monto_apertura).toFixed(2)}</strong>
+          {/* Banner estado */}
+          <div style={{ background: 'var(--ok-bg)', borderLeft: '4px solid var(--ok)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--ok)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <span>✓ <strong>Turno {sesion.tipo_turno === 'manana' ? '☀️ mañana' : '🌙 tarde'} activo</strong></span>
+            <span>desde {new Date(sesion.fecha_apertura).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}</span>
+            <span>— Fondo: <strong>Bs {Number(sesion.monto_apertura).toFixed(2)}</strong></span>
+            <span style={{ marginLeft: 'auto', fontSize: 12 }}>Responsable: {sesion.profiles?.full_name}</span>
           </div>
 
-          {/* Resumen pan */}
+          {/* Pan */}
           <div className="card" style={{ padding: 20, marginBottom: 20 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>🍞 Pan del turno</h3>
             <div className="grid-3" style={{ gap: 12 }}>
               <div style={{ textAlign: 'center' }}>
-                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>Inicial</p>
-                <p style={{ fontSize: 28, fontWeight: 900 }}>{totalPanInicial}</p>
-                <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>{sesion.cajas_pan} cajas × {sesion.panes_por_caja} + {sesion.pan_sobrante_anterior} sob.</p>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>Pan inicial</p>
+                <p style={{ fontSize: 32, fontWeight: 900 }}>{totalPanInicial}</p>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>
+                  {sesion.cajas_pan > 0 ? `${sesion.cajas_pan} cajas × ${sesion.panes_por_caja}` : ''}
+                  {sesion.pan_sobrante_anterior > 0 ? ` + ${sesion.pan_sobrante_anterior} sobrantes` : ''}
+                </p>
               </div>
               <div style={{ textAlign: 'center' }}>
-                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>Vendido</p>
-                <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--ok)' }}>{movimientos.filter(m => m.tipo === 'venta' || m.tipo === 'reserva').length > 0 ? '—' : 0}</p>
-                <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>Ver inventario</p>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>Ventas totales</p>
+                <p style={{ fontSize: 32, fontWeight: 900, color: 'var(--ok)' }}>Bs {totalVentas.toFixed(2)}</p>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>Efectivo + QR</p>
               </div>
               <div style={{ textAlign: 'center' }}>
-                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>Caja actual</p>
-                <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--info)' }}>Bs {cajaTeórica.toFixed(2)}</p>
-                <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>teórica</p>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>Caja teórica</p>
+                <p style={{ fontSize: 32, fontWeight: 900, color: 'var(--info)' }}>Bs {cajaTeórica.toFixed(2)}</p>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>Fondo + efectivo − gastos</p>
               </div>
             </div>
           </div>
 
-          {/* Resumen ventas */}
-          <ResumenTurno sesion={sesion} movimientos={movimientos} gastos={gastos} />
+          {/* Métricas */}
+          <div className="grid-4" style={{ marginBottom: 20 }}>
+            {[['Efectivo', ef, 'ok'], ['QR', qr, 'info'], ['Transferencia', tr, 'info'], ['Gastos', gastoTotal, 'err']].map(([l, v, t]) => (
+              <div key={l} className="card" style={{ padding: '14px 18px' }}>
+                <p style={{ fontSize: 11, color: 'var(--text-soft)', textTransform: 'uppercase', marginBottom: 4 }}>{l}</p>
+                <p style={{ fontSize: 20, fontWeight: 700 }}>Bs {Number(v).toFixed(2)}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Resumen turno anterior si es tarde */}
+          {sesion.tipo_turno === 'tarde' && sesionAnterior && (
+            <div style={{ background: 'var(--yellow-soft)', borderRadius: 10, padding: '14px 18px', marginBottom: 20, fontSize: 13 }}>
+              <p style={{ fontWeight: 700, marginBottom: 8 }}>☀️ Resumen turno mañana</p>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                <span>Ventas: <strong>Bs {Number(sesionAnterior.resumen_turno?.total_ventas ?? 0).toFixed(2)}</strong></span>
+                <span>Pan sobrante: <strong>{sesionAnterior.pan_sobrante_cierre ?? 0} panes</strong></span>
+                {Number(sesionAnterior.perdidas_monto ?? 0) > 0 && (
+                  <span style={{ color: 'var(--err)' }}>Pérdidas: <strong>Bs {Number(sesionAnterior.perdidas_monto).toFixed(2)}</strong></span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Movimientos */}
-          <div className="card" style={{ overflow: 'hidden', marginTop: 20 }}>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--silver-light)', fontWeight: 700 }}>Movimientos del turno</div>
+          <div className="card" style={{ overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--silver-light)', fontWeight: 700, fontSize: 15 }}>
+              Movimientos del turno
+            </div>
             <div className="table-scroll">
               <table className="clap-table">
-                <thead><tr><th>Hora</th><th>Tipo</th><th>Medio</th><th>Monto</th></tr></thead>
+                <thead>
+                  <tr><th>Hora</th><th>Tipo</th><th>Medio</th><th>Monto</th></tr>
+                </thead>
                 <tbody>
                   {movimientos.length === 0
                     ? <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-soft)', padding: 24 }}>Sin movimientos</td></tr>
                     : movimientos.map(m => (
                       <tr key={m.id}>
-                        <td style={{ color: 'var(--text-soft)' }}>{new Date(m.fecha).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}</td>
-                        <td><span className={m.tipo === 'gasto' ? 'badge-err' : 'badge-ok'}>{m.tipo}</span></td>
+                        <td style={{ color: 'var(--text-soft)', whiteSpace: 'nowrap' }}>
+                          {new Date(m.fecha).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td><span className={m.tipo === 'gasto' ? 'badge-err' : m.tipo === 'reserva' ? 'badge-warn' : 'badge-ok'}>{m.tipo}</span></td>
                         <td>{m.medio_pago ?? '—'}</td>
                         <td style={{ fontWeight: 700 }}>Bs {Number(m.monto).toFixed(2)}</td>
                       </tr>
@@ -254,12 +311,12 @@ export default function Caja() {
       )}
 
       {/* ─── MODAL APERTURA ─── */}
-      <Modal open={step === 'apertura'} onClose={() => setStep('idle')} title={`Iniciar turno ${tipoTurno === 'manana' ? '☀️ mañana' : '🌙 tarde'}`}>
-        {/* Tipo de turno */}
+      <Modal open={step === 'apertura'} onClose={() => setStep('idle')} title="Iniciar turno">
+        {/* Tipo turno */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
           {[['manana','☀️ Turno mañana'], ['tarde','🌙 Turno tarde']].map(([k, l]) => (
             <button key={k} onClick={() => setTipoTurno(k)}
-              style={{ padding: '12px', borderRadius: 10, border: `2px solid ${tipoTurno === k ? 'var(--yellow-dark)' : 'var(--silver-light)'}`, background: tipoTurno === k ? 'var(--yellow-soft)' : '#fff', fontWeight: 700, cursor: 'pointer' }}>
+              style={{ padding: 14, borderRadius: 12, border: `2px solid ${tipoTurno === k ? 'var(--yellow-dark)' : 'var(--silver-light)'}`, background: tipoTurno === k ? 'var(--yellow-soft)' : '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
               {l}
             </button>
           ))}
@@ -270,38 +327,46 @@ export default function Caja() {
           <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>🍞 Registro de pan</p>
           {panSobrAnterior > 0 && (
             <div style={{ background: 'var(--info-bg)', color: 'var(--info)', borderRadius: 8, padding: '8px 12px', marginBottom: 12, fontSize: 13 }}>
-              📦 Pan sobrante de ayer/turno anterior: <strong>{panSobrAnterior} panes</strong>
+              📦 Pan sobrante cargado automáticamente: <strong>{panSobrAnterior} panes</strong>
             </div>
           )}
           <div className="grid-3" style={{ gap: 10, marginBottom: 12 }}>
             <div>
               <label className="form-label">Cajas nuevas</label>
-              <input className="form-input" type="number" value={cajasPan} onChange={e => setCajasPan(+e.target.value)} style={{ textAlign: 'center', fontWeight: 700 }} />
+              <input className="form-input" type="number" value={cajasPan}
+                onChange={e => setCajasPan(+e.target.value)}
+                style={{ textAlign: 'center', fontWeight: 700, fontSize: 18 }} />
             </div>
             <div>
-              <label className="form-label">Panes/caja</label>
-              <input className="form-input" type="number" value={panesCaja} onChange={e => setPanesCaja(+e.target.value)} style={{ textAlign: 'center', fontWeight: 700 }} />
+              <label className="form-label">Panes / caja</label>
+              <input className="form-input" type="number" value={panesCaja}
+                onChange={e => setPanesCaja(+e.target.value)}
+                style={{ textAlign: 'center', fontWeight: 700, fontSize: 18 }} />
             </div>
             <div>
-              <label className="form-label">Pan de ayer</label>
-              <input className="form-input" type="number" value={panSobrAnterior} onChange={e => setPanSobrAnterior(+e.target.value)} style={{ textAlign: 'center', fontWeight: 700 }} />
+              <label className="form-label">Pan sobrante</label>
+              <input className="form-input" type="number" value={panSobrAnterior}
+                onChange={e => setPanSobrAnterior(+e.target.value)}
+                style={{ textAlign: 'center', fontWeight: 700, fontSize: 18 }} />
             </div>
           </div>
-          <div style={{ background: 'var(--yellow-soft)', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 16 }}>
-            <span>Total panes al iniciar</span>
-            <span>{cajasPan * panesCaja + panSobrAnterior} panes</span>
+          <div style={{ background: 'var(--yellow-soft)', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 18 }}>
+            <span>Total panes</span>
+            <span>{cajasPan * panesCaja + panSobrAnterior}</span>
           </div>
         </div>
 
         {/* Denominaciones */}
         <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <p style={{ fontSize: 13, fontWeight: 700 }}>💰 Conteo de caja</p>
-            <span style={{ fontSize: 16, fontWeight: 800, color: totalDenoms(denom) >= 200 ? 'var(--ok)' : 'var(--err)' }}>
+            <span style={{ fontSize: 18, fontWeight: 800, color: totalDenoms(denom) >= 200 ? 'var(--ok)' : 'var(--err)' }}>
               Bs {totalDenoms(denom).toFixed(2)}
             </span>
           </div>
-          {totalDenoms(denom) < 200 && <p style={{ fontSize: 12, color: 'var(--err)', marginBottom: 8 }}>Mínimo requerido: Bs 200</p>}
+          {totalDenoms(denom) < 200 && (
+            <p style={{ fontSize: 12, color: 'var(--err)', marginBottom: 8 }}>⚠ Mínimo requerido: Bs 200</p>
+          )}
           <DenomInput value={denom} onChange={setDenom} />
         </div>
 
@@ -315,13 +380,13 @@ export default function Caja() {
 
       {/* ─── MODAL CIERRE ─── */}
       <Modal open={step === 'cierre'} onClose={() => setStep('idle')} title={`Cerrar turno ${sesion?.tipo_turno === 'manana' ? '☀️ mañana' : '🌙 tarde'}`}>
-        {/* Resumen antes del cierre */}
+        {/* Resumen */}
         <div style={{ background: 'var(--bg-soft)', borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 13 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Fondo inicial</span><span>Bs {Number(sesion?.monto_apertura ?? 0).toFixed(2)}</span></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Ventas efectivo</span><span>Bs {ef.toFixed(2)}</span></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Ventas QR</span><span>Bs {qr.toFixed(2)}</span></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: 'var(--err)' }}><span>Gastos</span><span>- Bs {gastoTotal.toFixed(2)}</span></div>
-          <div style={{ borderTop: '1px solid var(--silver)', paddingTop: 8, marginTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 15 }}>
+          <div style={{ borderTop: '1px solid var(--silver)', paddingTop: 8, marginTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 16 }}>
             <span>Caja teórica</span><span>Bs {cajaTeórica.toFixed(2)}</span>
           </div>
         </div>
@@ -329,41 +394,53 @@ export default function Caja() {
         {/* Pan sobrante */}
         <div className="card" style={{ padding: 14, marginBottom: 14 }}>
           <label className="form-label">🍞 Panes sobrantes al cerrar</label>
-          <input className="form-input" type="number" value={panSobrCierre} onChange={e => setPanSobrCierre(+e.target.value)}
-            style={{ textAlign: 'center', fontWeight: 700, fontSize: 20 }} placeholder="0" />
-          <p style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 6 }}>
-            {sesion?.tipo_turno === 'tarde' ? 'Estos panes pasarán al turno mañana del próximo día' : 'Pasarán al turno tarde de hoy'}
+          <input className="form-input" type="number" value={panSobrCierre}
+            onChange={e => setPanSobrCierre(+e.target.value)}
+            style={{ textAlign: 'center', fontWeight: 800, fontSize: 24, marginBottom: 6 }} placeholder="0" />
+          <p style={{ fontSize: 11, color: 'var(--text-soft)' }}>
+            {sesion?.tipo_turno === 'tarde' ? 'Pasarán al turno mañana del próximo día' : 'Pasarán al turno tarde de hoy'}
           </p>
         </div>
 
         {/* Pérdidas */}
-        <div className="card" style={{ padding: 14, marginBottom: 14, borderLeft: '3px solid var(--err)' }}>
+        <div style={{ border: '1.5px solid var(--err-bg)', borderRadius: 12, padding: 14, marginBottom: 14 }}>
           <label className="form-label">⚠ ¿Hubo pérdidas? (opcional)</label>
-          <input className="form-input" type="number" value={perdidasMonto || ''} onChange={e => setPerdidasMonto(+e.target.value)} placeholder="Monto en Bs" style={{ marginBottom: 8 }} />
-          <input className="form-input" value={perdidasNota} onChange={e => setPerdidasNota(e.target.value)} placeholder="Descripción de la pérdida" />
+          <input className="form-input" type="number" value={perdidasMonto || ''}
+            onChange={e => setPerdidasMonto(+e.target.value)}
+            placeholder="Monto en Bs" style={{ marginBottom: 8 }} />
+          <input className="form-input" value={perdidasNota}
+            onChange={e => setPerdidasNota(e.target.value)}
+            placeholder="Descripción de la pérdida" />
         </div>
 
         {/* Conteo físico */}
         <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <p style={{ fontSize: 13, fontWeight: 700 }}>💰 Conteo físico de caja</p>
-            <span style={{ fontSize: 16, fontWeight: 800 }}>Bs {totalDenoms(denomCierre).toFixed(2)}</span>
+            <span style={{ fontSize: 18, fontWeight: 800 }}>Bs {totalDenoms(denomCierre).toFixed(2)}</span>
           </div>
           <DenomInput value={denomCierre} onChange={setDenomCierre} />
         </div>
 
         {totalDenoms(denomCierre) > 0 && (
-          <div style={{ background: diferenciaCierre < 0 ? 'var(--err-bg)' : 'var(--ok-bg)', color: diferenciaCierre < 0 ? 'var(--err)' : 'var(--ok)', borderRadius: 10, padding: '10px 14px', fontWeight: 800, fontSize: 16, textAlign: 'center', marginBottom: 14 }}>
+          <div style={{
+            background: diferenciaCierre < -1 ? 'var(--err-bg)' : 'var(--ok-bg)',
+            color: diferenciaCierre < -1 ? 'var(--err)' : 'var(--ok)',
+            borderRadius: 10, padding: '10px 14px', fontWeight: 800,
+            fontSize: 18, textAlign: 'center', marginBottom: 14,
+          }}>
             Diferencia: {diferenciaCierre >= 0 ? '+' : ''}Bs {diferenciaCierre.toFixed(2)}
           </div>
         )}
 
-        {/* Resumen turno anterior si es tarde */}
+        {/* Resumen turno anterior (si es tarde) */}
         {sesion?.tipo_turno === 'tarde' && sesionAnterior && (
-          <div style={{ background: 'var(--info-bg)', borderRadius: 10, padding: 14, marginBottom: 14, fontSize: 13 }}>
-            <p style={{ fontWeight: 700, marginBottom: 8 }}>☀️ Resumen turno mañana</p>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}><span>Total ventas</span><span>Bs {Number(sesionAnterior.resumen_turno?.total_ventas ?? 0).toFixed(2)}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Pan sobrante</span><span>{sesionAnterior.pan_sobrante_cierre ?? 0} panes</span></div>
+          <div style={{ background: 'var(--yellow-soft)', borderRadius: 10, padding: 14, marginBottom: 14, fontSize: 13 }}>
+            <p style={{ fontWeight: 700, marginBottom: 6 }}>☀️ Resumen turno mañana</p>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <span>Ventas: <strong>Bs {Number(sesionAnterior.resumen_turno?.total_ventas ?? 0).toFixed(2)}</strong></span>
+              <span>Pan sobrante: <strong>{sesionAnterior.pan_sobrante_cierre ?? 0}</strong></span>
+            </div>
           </div>
         )}
 
@@ -371,6 +448,42 @@ export default function Caja() {
           <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setStep('idle')}>Cancelar</button>
           <button className="btn-primary" style={{ flex: 1 }} disabled={totalDenoms(denomCierre) <= 0} onClick={cerrarCaja}>
             Confirmar cierre
+          </button>
+        </div>
+      </Modal>
+
+      {/* ─── MODAL AJUSTE DE FONDO ─── */}
+      <Modal open={step === 'ajuste'} onClose={() => setStep('idle')} title="⚙ Ajustar fondo de caja">
+        <div style={{ background: 'var(--warn-bg)', color: 'var(--warn)', padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16 }}>
+          ⚠ Esta acción queda registrada en auditoría con tu usuario y hora exacta.
+        </div>
+
+        <div style={{ background: 'var(--bg-soft)', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Fondo actual registrado</span>
+            <span style={{ fontWeight: 700 }}>Bs {Number(sesion?.monto_apertura ?? 0).toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <p style={{ fontSize: 13, fontWeight: 700 }}>💰 Nuevo conteo de caja</p>
+          <span style={{ fontSize: 18, fontWeight: 800, color: totalDenoms(denomAjuste) > 0 ? 'var(--ok)' : 'var(--text-soft)' }}>
+            Bs {totalDenoms(denomAjuste).toFixed(2)}
+          </span>
+        </div>
+        <DenomInput value={denomAjuste} onChange={setDenomAjuste} />
+
+        <label className="form-label" style={{ marginTop: 16 }}>Motivo del ajuste</label>
+        <input className="form-input" style={{ marginBottom: 20 }} value={motivoAjuste}
+          onChange={e => setMotivoAjuste(e.target.value)}
+          placeholder="Ej: Error en conteo inicial, corrección de denominaciones" />
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setStep('idle')}>Cancelar</button>
+          <button className="btn-primary" style={{ flex: 1 }}
+            disabled={totalDenoms(denomAjuste) <= 0 || !motivoAjuste}
+            onClick={ajustarFondo}>
+            Confirmar ajuste
           </button>
         </div>
       </Modal>
