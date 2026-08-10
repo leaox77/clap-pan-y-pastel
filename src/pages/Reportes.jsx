@@ -39,7 +39,15 @@ export default function Reportes() {
     let qItems = supabase.from('venta_items').select('cantidad,subtotal,costo_unitario_snapshot,created_at,productos(nombre)')
       .gte('created_at', `${rango.desde}T00:00:00`).lte('created_at', `${rango.hasta}T23:59:59`)
     let qGastos = supabase.from('gastos').select('monto,categoria').gte('fecha', `${rango.desde}T00:00:00`).lte('fecha', `${rango.hasta}T23:59:59`)
-    let qMermas = supabase.from('inventario_movimientos').select('cantidad,tipo').filter('tipo', 'like', 'merma%')
+    let qMermas = supabase.from('inventario_movimientos').select('cantidad,tipo').in('tipo', [
+  'merma_danado',
+  'merma_vencido',
+  'merma_consumo_interno',
+  'merma_degustacion',
+  'merma_donacion',
+  'merma_regalo',
+  'merma_diferencia',
+])
       .gte('fecha', `${rango.desde}T00:00:00`).lte('fecha', `${rango.hasta}T23:59:59`)
     let qReservas = supabase.from('vista_reservas').select('total,estado,medio_pago,created_at,sucursal_id')
       .gte('created_at', `${rango.desde}T00:00:00`).lte('created_at', `${rango.hasta}T23:59:59`)

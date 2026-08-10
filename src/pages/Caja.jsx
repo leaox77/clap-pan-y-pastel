@@ -194,7 +194,6 @@ export default function Caja() {
           )
         `)
         .eq('sucursal_id', sucursalActivaId)
-        .order('nombre')
 
       if (productosError) {
         console.error(
