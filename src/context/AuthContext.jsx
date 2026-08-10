@@ -1,4 +1,3 @@
-// src/context/AuthContext.jsx
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
@@ -6,24 +5,27 @@ const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [role, setRole] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
   async function loadProfile(u) {
-    if (!u) { setRole(null); return }
-    const { data } = await supabase.from('profiles').select('role').eq('id', u.id).single()
-    setRole(data?.role ?? null)
+    if (!u) { setProfile(null); return }
+    const { data } = await supabase.from('profiles')
+      .select('role, sucursal_id, full_name, active')
+      .eq('id', u.id).single()
+    setProfile(data ?? null)
   }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null)
-      loadProfile(data.session?.user)
-      setLoading(false)
+      const u = data.session?.user ?? null
+      setUser(u)
+      loadProfile(u).then(() => setLoading(false))
     })
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null)
-      loadProfile(session?.user)
+      const u = session?.user ?? null
+      setUser(u)
+      loadProfile(u)
     })
     return () => sub.subscription.unsubscribe()
   }, [])
@@ -32,9 +34,16 @@ export function AuthProvider({ children }) {
   const signOut = () => supabase.auth.signOut()
 
   return (
-    <AuthContext.Provider value={{ user, role, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{
+      user, loading, signIn, signOut,
+      role: profile?.role ?? null,
+      sucursalId: profile?.sucursal_id ?? null,
+      fullName: profile?.full_name ?? null,
+      profile,
+    }}>
       {children}
     </AuthContext.Provider>
   )
 }
+
 export const useAuth = () => useContext(AuthContext)

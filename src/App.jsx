@@ -11,17 +11,21 @@ import Gastos from './pages/Gastos'
 import Mermas from './pages/Mermas'
 import Reportes from './pages/Reportes'
 import Usuarios from './pages/Usuarios'
+import Sucursales from './pages/Sucursales'
+import Auditoria from './pages/Auditoria'
 
 function Layout({ children }) {
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', width: '100%', maxWidth: '100vw', overflowX: 'hidden' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', maxWidth: '100vw', overflowX: 'hidden' }}>
       <Sidebar />
-      <main style={{ flex: 1, minWidth: 0, width: '100%', overflowX: 'hidden', overflowY: 'auto', background: 'var(--bg-soft)' }}>
+      <main style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', background: 'var(--bg-soft)' }}>
         {children}
       </main>
     </div>
   )
 }
+
+const ADMIN = ['administrador', 'propietaria']
 
 export default function App() {
   const { loading } = useAuth()
@@ -43,8 +47,10 @@ export default function App() {
       <Route path="/caja" element={<ProtectedRoute><Layout><Caja /></Layout></ProtectedRoute>} />
       <Route path="/gastos" element={<ProtectedRoute><Layout><Gastos /></Layout></ProtectedRoute>} />
       <Route path="/mermas" element={<ProtectedRoute><Layout><Mermas /></Layout></ProtectedRoute>} />
-      <Route path="/reportes" element={<ProtectedRoute roles={['administrador','propietaria']}><Layout><Reportes /></Layout></ProtectedRoute>} />
-      <Route path="/usuarios" element={<ProtectedRoute roles={['administrador','propietaria']}><Layout><Usuarios /></Layout></ProtectedRoute>} />
+      <Route path="/reportes" element={<ProtectedRoute roles={ADMIN}><Layout><Reportes /></Layout></ProtectedRoute>} />
+      <Route path="/sucursales" element={<ProtectedRoute roles={ADMIN}><Layout><Sucursales /></Layout></ProtectedRoute>} />
+      <Route path="/usuarios" element={<ProtectedRoute roles={ADMIN}><Layout><Usuarios /></Layout></ProtectedRoute>} />
+      <Route path="/auditoria" element={<ProtectedRoute roles={ADMIN}><Layout><Auditoria /></Layout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
