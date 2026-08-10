@@ -80,7 +80,11 @@ export default function Caja() {
   const toast = useToast()
 
   const { role } = useAuth()
-  const { sucursalActivaId, sucursalActiva } = useSucursal()
+
+  const {
+    sucursalActivaId,
+    sucursalActiva,
+  } = useSucursal()
 
   const esAdmin = ['administrador', 'propietaria'].includes(role)
 
@@ -90,7 +94,6 @@ export default function Caja() {
   const [gastos, setGastos] = useState([])
   const [productos, setProductos] = useState([])
   const [sobraantesPendientes, setSobraantesPendientes] = useState([])
-
   const [loading, setLoading] = useState(true)
   const [step, setStep] = useState('idle')
 
@@ -124,17 +127,23 @@ export default function Caja() {
       setSesionAnterior(null)
       setMovimientos([])
       setGastos([])
+      setProductos([])
       setSobraantesPendientes([])
+      setSobraantesConfirmados([])
       setLoading(false)
       return
     }
 
     setStep('idle')
+
     setSesion(null)
     setSesionAnterior(null)
     setMovimientos([])
     setGastos([])
+    setProductos([])
     setSobraantesPendientes([])
+    setSobraantesConfirmados([])
+
     setDenom({})
     setDenomCierre({})
     setDenomAjuste({})
@@ -149,9 +158,12 @@ export default function Caja() {
 
     try {
       /*
-       * 1. Caja abierta de ESTA sucursal
-       */
-      const { data: s, error: sesionError } = await supabase
+      * 1. CAJA ABIERTA DE LA SUCURSAL ACTIVA
+      */
+      const {
+        data: s,
+        error: sesionError,
+      } = await supabase
         .from('caja_sesiones')
         .select('*, profiles!usuario_apertura_id(full_name)')
         .eq('estado', 'abierta')
@@ -160,65 +172,98 @@ export default function Caja() {
         .maybeSingle()
 
       if (sesionError) {
-        console.error('Error cargando caja:', sesionError)
+        console.error(
+          'Error cargando caja:',
+          sesionError
+        )
       }
 
       /*
-       * 2. Productos activos
-       *
-       * Los productos no se filtran por sucursal porque
-       * actualmente tu tabla productos parece ser global.
-       */
-      const { data: prods, error: productosError } = await supabase
-        .from('productos')
-        .select('id, nombre, es_pan')
-        .eq('activo', true)
+      * 2. PRODUCTOS DISPONIBLES EN ESTA SUCURSAL
+      */
+      const {
+        data: prods,
+        error: productosError,
+      } = await supabase
+        .from('inventario_sucursal')
+        .select(`
+          *,
+          productos (
+            *,
+            categorias(nombre)
+          )
+        `)
+        .eq('sucursal_id', sucursalActivaId)
         .order('nombre')
 
       if (productosError) {
-        console.error('Error cargando productos:', productosError)
+        console.error(
+          'Error cargando productos:',
+          productosError
+        )
       }
 
-      setProductos(prods ?? [])
+      /*
+      * Normalizamos el resultado de inventario_sucursal
+      * para que Caja pueda seguir usando p.nombre,
+      * p.precio_venta, p.es_pan, etc.
+      */
+      const productosNormalizados = (prods ?? [])
+        .map(item => ({
+          ...item,
+          ...(item.productos ?? {}),
+          categoria: item.productos?.categorias ?? null,
+        }))
+        .filter(p => p.activo !== false)
+
+      setProductos(productosNormalizados)
       setSesion(s ?? null)
 
       /*
-       * ==========================================================
-       * HAY CAJA ABIERTA
-       * ==========================================================
-       */
+      * =====================================================
+      * HAY CAJA ABIERTA
+      * =====================================================
+      */
       if (s) {
         const [
           { data: movs, error: movError },
-          { data: g, error: gastoError }
+          { data: g, error: gastoError },
         ] = await Promise.all([
           supabase
             .from('caja_movimientos')
             .select('*')
             .eq('caja_sesion_id', s.id)
-            .order('fecha', { ascending: false }),
+            .order('fecha', {
+              ascending: false,
+            }),
 
           supabase
             .from('gastos')
             .select('*')
-            .eq('caja_sesion_id', s.id)
+            .eq('caja_sesion_id', s.id),
         ])
 
         if (movError) {
-          console.error('Error cargando movimientos:', movError)
+          console.error(
+            'Error cargando movimientos:',
+            movError
+          )
         }
 
         if (gastoError) {
-          console.error('Error cargando gastos:', gastoError)
+          console.error(
+            'Error cargando gastos:',
+            gastoError
+          )
         }
 
         setMovimientos(movs ?? [])
         setGastos(g ?? [])
 
         /*
-         * Sesión anterior:
-         * también comprobamos que pertenezca a la misma sucursal.
-         */
+        * Sesión anterior:
+        * SIEMPRE de la misma sucursal.
+        */
         if (s.sesion_anterior_id) {
           const { data: ant } = await supabase
             .from('caja_sesiones')
@@ -232,94 +277,146 @@ export default function Caja() {
           setSesionAnterior(null)
         }
 
-      /*
-       * ==========================================================
-       * NO HAY CAJA ABIERTA
-       * ==========================================================
-       */
-      } else {
-        const ayer = new Date()
-        ayer.setDate(ayer.getDate() - 1)
-
-        const ayerStr = ayer.toISOString().split('T')[0]
-
         /*
-         * Sobrantes pendientes:
-         * SOLO de la sucursal actual.
-         */
-        const { data: sob, error: sobError } = await supabase
-          .from('sobrantes_dia')
-          .select('*')
-          .eq('confirmado', false)
-          .eq('sucursal_id', sucursalActivaId)
-          .gte('fecha', ayerStr)
-          .order('created_at', { ascending: false })
+        * No necesitamos cargar sobrantes para apertura
+        * mientras exista una caja abierta.
+        */
+        setSobraantesPendientes([])
+        setSobraantesConfirmados([])
 
-        if (sobError) {
-          console.error('Error cargando sobrantes:', sobError)
-        }
-
-        /*
-         * Última sesión cerrada:
-         * SOLO de la sucursal actual.
-         */
-        const { data: ultima, error: ultimaError } = await supabase
-          .from('caja_sesiones')
-          .select('*')
-          .eq('estado', 'cerrada')
-          .eq('sucursal_id', sucursalActivaId)
-          .gte('fecha_apertura', `${ayerStr}T00:00:00`)
-          .order('fecha_cierre', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        if (ultimaError) {
-          console.error('Error cargando última sesión:', ultimaError)
-        }
-
-        /*
-         * Preparar sobrantes.
-         */
-        const sobConCantidad = (sob ?? []).map(s => ({
-          ...s,
-          cantidad_recibida: s.cantidad_registrada
-        }))
-
-        setSobraantesPendientes(sobConCantidad)
-
-        setSobraantesConfirmados(
-          sobConCantidad.map(s => ({ ...s }))
-        )
-
-        /*
-         * Preparar apertura según el último turno
-         * DE ESTA SUCURSAL.
-         */
-        if (ultima) {
-          setSesionAnterior(ultima)
-
-          if (ultima.tipo_turno === 'manana') {
-            setTipoTurno('tarde')
-            setPanSobrAnterior(
-              ultima.pan_sobrante_cierre ?? 0
-            )
-            setCajasPan('')
-          } else {
-            setTipoTurno('manana')
-            setPanSobrAnterior(0)
-            setCajasPan('')
-          }
-        } else {
-          setSesionAnterior(null)
-          setTipoTurno('manana')
-          setPanSobrAnterior(0)
-          setCajasPan('')
-        }
+        return
       }
 
+      /*
+      * =====================================================
+      * NO HAY CAJA ABIERTA
+      * =====================================================
+      */
+
+      const ayer = new Date()
+      ayer.setDate(ayer.getDate() - 1)
+
+      const ayerStr = ayer
+        .toISOString()
+        .split('T')[0]
+
+      /*
+      * Sobrantes pendientes:
+      * SOLO de la sucursal activa.
+      */
+      const {
+        data: sob,
+        error: sobError,
+      } = await supabase
+        .from('sobrantes_dia')
+        .select('*')
+        .eq('confirmado', false)
+        .eq('sucursal_id', sucursalActivaId)
+        .gte('fecha', ayerStr)
+        .order('created_at', {
+          ascending: false,
+        })
+
+      if (sobError) {
+        console.error(
+          'Error cargando sobrantes:',
+          sobError
+        )
+      }
+
+      /*
+      * Última sesión cerrada:
+      * SOLO de la sucursal activa.
+      */
+      const {
+        data: ultima,
+        error: ultimaError,
+      } = await supabase
+        .from('caja_sesiones')
+        .select('*')
+        .eq('estado', 'cerrada')
+        .eq('sucursal_id', sucursalActivaId)
+        .gte(
+          'fecha_apertura',
+          `${ayerStr}T00:00:00`
+        )
+        .lte(
+          'fecha_apertura',
+          `${ayerStr}T23:59:59`
+        )
+        .order('fecha_cierre', {
+          ascending: false,
+        })
+        .limit(1)
+        .maybeSingle()
+
+      if (ultimaError) {
+        console.error(
+          'Error cargando última sesión:',
+          ultimaError
+        )
+      }
+
+      const sobConCantidad = (sob ?? []).map(s => ({
+        ...s,
+        cantidad_recibida:
+          s.cantidad_registrada,
+      }))
+
+      setSobraantesPendientes(
+        sobConCantidad
+      )
+
+      setSobraantesConfirmados(
+        sobConCantidad.map(s => ({
+          ...s,
+          incluir: true,
+          esmerma: false,
+        }))
+      )
+
+      /*
+      * Determinar turno.
+      */
+      if (ultima) {
+        setSesionAnterior(ultima)
+
+        if (ultima.tipo_turno === 'manana') {
+          setTipoTurno('tarde')
+
+          setPanSobrAnterior(
+            Number(
+              ultima.pan_sobrante_cierre ?? 0
+            )
+          )
+
+          setCajasPan('')
+        } else {
+          setTipoTurno('manana')
+
+          setPanSobrAnterior(0)
+
+          setCajasPan('')
+        }
+      } else {
+        setSesionAnterior(null)
+
+        setTipoTurno('manana')
+
+        setPanSobrAnterior(0)
+
+        setCajasPan('')
+      }
     } catch (err) {
-      console.error('Error general cargando Caja:', err)
-      toast('No se pudo cargar la información de caja', 'err')
+      console.error(
+        'Error general cargando Caja:',
+        err
+      )
+
+      toast(
+        'No se pudo cargar la información de caja',
+        'err'
+      )
     } finally {
       setLoading(false)
     }
@@ -332,57 +429,78 @@ export default function Caja() {
    */
   async function abrirCaja() {
     if (!sucursalActivaId) {
-      toast('No hay una sucursal seleccionada', 'err')
+      toast(
+        'No hay una sucursal seleccionada',
+        'err'
+      )
       return
     }
 
     const monto = totalDenoms(denom)
 
     /*
-     * Primero procesar las mermas.
-     */
+    * Procesar mermas de sobrantes.
+    */
     for (const s of sobraantesConfirmados) {
-      if (s.esmerma) {
-        if (!s.motivo_merma?.trim()) {
-          toast(
-            `Escribe el motivo de merma para "${s.producto_nombre}"`,
-            'warn'
-          )
-          return
-        }
+      if (!s.esmerma) continue
 
-        const { error } = await supabase.rpc(
+      if (!s.motivo_merma?.trim()) {
+        toast(
+          `Escribe el motivo de merma para "${s.producto_nombre}"`,
+          'warn'
+        )
+        return
+      }
+
+      const { error } =
+        await supabase.rpc(
           'sobrante_a_merma',
           {
             p_sobrante_id: s.id,
-            p_motivo: s.motivo_merma
+            p_motivo: s.motivo_merma,
           }
         )
 
-        if (error) {
-          console.error('Error procesando merma:', error)
-          toast(error.message, 'err')
-          return
-        }
+      if (error) {
+        console.error(
+          'Error procesando merma:',
+          error
+        )
+
+        toast(
+          error.message,
+          'err'
+        )
+
+        return
       }
     }
 
     /*
-     * IMPORTANTE:
-     * Ahora enviamos explícitamente la sucursal seleccionada.
-     */
-    const { data, error } = await supabase.rpc(
+    * Abrir caja.
+    */
+    const {
+      data,
+      error,
+    } = await supabase.rpc(
       'abrir_caja',
       {
         p_monto: monto,
         p_denominaciones: denom,
         p_tipo_turno: tipoTurno,
-        p_cajas_pan: Number(cajasPan) || 0,
-        p_panes_por_caja: Number(panesCaja) || 90,
+
+        p_cajas_pan:
+          Number(cajasPan) || 0,
+
+        p_panes_por_caja:
+          Number(panesCaja) || 90,
+
         p_pan_sobrante_anterior:
           Number(panSobrAnterior) || 0,
+
         p_sesion_anterior_id:
           sesionAnterior?.id ?? null,
+
         p_sobrantes_confirmados:
           sobraantesConfirmados
             .filter(
@@ -392,17 +510,38 @@ export default function Caja() {
             )
             .map(s => ({
               id: s.id,
-              producto_id: s.producto_id,
+              producto_id:
+                s.producto_id,
               cantidad_recibida:
-                s.cantidad_recibida
+                Number(
+                  s.cantidad_recibida
+                ),
             })),
-        p_sucursal_id: sucursalActivaId
+
+        /*
+        * IMPORTANTE:
+        * administrador/propietaria utilizan
+        * la sucursal seleccionada.
+        *
+        * cajero será validado nuevamente
+        * en el RPC usando su perfil.
+        */
+        p_sucursal_id:
+          sucursalActivaId,
       }
     )
 
     if (error) {
-      console.error('Error abriendo caja:', error)
-      toast(error.message, 'err')
+      console.error(
+        'Error abriendo caja:',
+        error
+      )
+
+      toast(
+        error.message,
+        'err'
+      )
+
       return
     }
 
@@ -415,7 +554,8 @@ export default function Caja() {
 
     const totalPan =
       (Number(cajasPan) || 0) *
-        (Number(panesCaja) || 90) +
+        (Number(panesCaja) || 90)
+      +
       (Number(panSobrAnterior) || 0)
 
     toast(
@@ -444,15 +584,16 @@ export default function Caja() {
    */
   async function cerrarCaja() {
     if (!sesion) {
-      toast('No hay una caja abierta', 'err')
+      toast(
+        'No hay una caja abierta',
+        'err'
+      )
       return
     }
 
     /*
-     * Protección adicional:
-     * nunca permitimos cerrar desde la UI
-     * una sesión que no pertenece a la sucursal activa.
-     */
+    * Protección adicional en frontend.
+    */
     if (
       sesion.sucursal_id &&
       sesion.sucursal_id !== sucursalActivaId
@@ -474,34 +615,59 @@ export default function Caja() {
           Number(s.cantidad) > 0
       )
 
-    const { error } = await supabase.rpc(
+    const {
+      error,
+    } = await supabase.rpc(
       'cerrar_caja',
       {
-        p_caja_sesion_id: sesion.id,
-        p_monto_fisico: montoFisico,
-        p_denominaciones: denomCierre,
+        p_caja_sesion_id:
+          sesion.id,
+
+        p_monto_fisico:
+          montoFisico,
+
+        p_denominaciones:
+          denomCierre,
+
         p_pan_sobrante_cierre:
           Number(panSobrCierre) || 0,
+
         p_perdidas_monto:
           Number(perdidasMonto) || 0,
-        p_perdidas_nota: perdidasNota,
+
+        p_perdidas_nota:
+          perdidasNota,
+
         p_sobrantes:
           sobFiltrados.map(s => ({
-            producto_id: s.producto_id,
+            producto_id:
+              s.producto_id,
+
             producto_nombre:
               productos.find(
-                p => p.id === s.producto_id
+                p =>
+                  p.id ===
+                  s.producto_id
               )?.nombre ??
               s.producto_id,
+
             cantidad:
-              Number(s.cantidad)
-          }))
+              Number(s.cantidad),
+          })),
       }
     )
 
     if (error) {
-      console.error('Error cerrando caja:', error)
-      toast(error.message, 'err')
+      console.error(
+        'Error cerrando caja:',
+        error
+      )
+
+      toast(
+        error.message,
+        'err'
+      )
+
       return
     }
 
@@ -511,6 +677,7 @@ export default function Caja() {
     )
 
     setStep('idle')
+
     setDenomCierre({})
     setPanSobrCierre('')
     setPerdidasMonto('')
@@ -527,7 +694,10 @@ export default function Caja() {
    */
   async function ajustarFondo() {
     if (!sesion) {
-      toast('No hay una caja abierta', 'err')
+      toast(
+        'No hay una caja abierta',
+        'err'
+      )
       return
     }
 
@@ -542,16 +712,33 @@ export default function Caja() {
       return
     }
 
+    if (!motivoAjuste.trim()) {
+      toast(
+        'Debes indicar el motivo del ajuste',
+        'warn'
+      )
+      return
+    }
+
     const nuevoMonto =
       totalDenoms(denomAjuste)
 
-    const { error } = await supabase.rpc(
+    const {
+      error,
+    } = await supabase.rpc(
       'ajustar_fondo_caja',
       {
-        p_caja_sesion_id: sesion.id,
-        p_nuevo_monto: nuevoMonto,
-        p_denominaciones: denomAjuste,
-        p_motivo: motivoAjuste
+        p_caja_sesion_id:
+          sesion.id,
+
+        p_nuevo_monto:
+          nuevoMonto,
+
+        p_denominaciones:
+          denomAjuste,
+
+        p_motivo:
+          motivoAjuste.trim(),
       }
     )
 
@@ -560,11 +747,19 @@ export default function Caja() {
         'Error ajustando fondo:',
         error
       )
-      toast(error.message, 'err')
+
+      toast(
+        error.message,
+        'err'
+      )
+
       return
     }
 
-    toast('Fondo ajustado', 'ok')
+    toast(
+      'Fondo ajustado',
+      'ok'
+    )
 
     setStep('idle')
     setDenomAjuste({})

@@ -46,7 +46,18 @@ export default function Sidebar() {
   const esAdmin = ['administrador', 'propietaria'].includes(role)
   const initials = (fullName?.[0] ?? user?.email?.[0] ?? '?').toUpperCase()
 
-  async function handleSignOut() { await signOut(); navigate('/login') }
+  async function handleLogout() {
+  const { error } = await signOut()
+
+  if (error) {
+    console.error(
+      'Error cerrando sesión:',
+      error
+    )
+  }
+
+  window.location.href = '/login'
+}
 
   return (
     <>
@@ -121,7 +132,7 @@ export default function Sidebar() {
               <div style={{ fontSize: 10, color: 'var(--text-soft)' }}>{role}</div>
             </div>
           </div>
-          <button onClick={handleSignOut} className="btn-secondary" style={{ width: '100%', fontSize: 12, padding: '7px 12px' }}>
+          <button onClick={handleLogout} className="btn-secondary" style={{ width: '100%', fontSize: 12, padding: '7px 12px' }}>
             Cerrar sesión
           </button>
         </div>
