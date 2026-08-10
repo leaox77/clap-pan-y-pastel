@@ -10,6 +10,7 @@ import Caja from './pages/Caja'
 import Gastos from './pages/Gastos'
 import Mermas from './pages/Mermas'
 import Reportes from './pages/Reportes'
+import Reservas from './pages/Reservas'
 import Usuarios from './pages/Usuarios'
 import Sucursales from './pages/Sucursales'
 import Auditoria from './pages/Auditoria'
@@ -47,6 +48,7 @@ export default function App() {
       <Route path="/caja" element={<ProtectedRoute><Layout><Caja /></Layout></ProtectedRoute>} />
       <Route path="/gastos" element={<ProtectedRoute><Layout><Gastos /></Layout></ProtectedRoute>} />
       <Route path="/mermas" element={<ProtectedRoute><Layout><Mermas /></Layout></ProtectedRoute>} />
+      <Route path="/reservas" element={<ProtectedRoute><Layout><Reservas /></Layout></ProtectedRoute>} />
       <Route path="/reportes" element={<ProtectedRoute roles={ADMIN}><Layout><Reportes /></Layout></ProtectedRoute>} />
       <Route path="/sucursales" element={<ProtectedRoute roles={ADMIN}><Layout><Sucursales /></Layout></ProtectedRoute>} />
       <Route path="/usuarios" element={<ProtectedRoute roles={ADMIN}><Layout><Usuarios /></Layout></ProtectedRoute>} />

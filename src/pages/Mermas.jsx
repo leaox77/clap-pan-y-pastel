@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useToast } from '../context/ToastContext'
+import { useSucursal } from '../context/SucursalContext'
 import Modal from '../components/Modal'
 
 const TIPOS = {
@@ -10,28 +11,39 @@ const TIPOS = {
 
 export default function Mermas() {
   const toast = useToast()
+  const { sucursalActivaId } = useSucursal()
   const [mermas, setMermas] = useState([])
   const [productos, setProductos] = useState([])
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState({ producto_id: '', tipo: 'merma_danado', cantidad: '', nota: '' })
   const [filtroFecha, setFiltroFecha] = useState(new Date().toISOString().split('T')[0])
 
-  useEffect(() => { fetchData() }, [filtroFecha])
+  useEffect(() => { if (sucursalActivaId !== undefined) fetchData() }, [filtroFecha, sucursalActivaId])
 
   async function fetchData() {
-    const [{ data: mv }, { data: prods }] = await Promise.all([
-      supabase.from('inventario_movimientos').select('*, productos(nombre)')
-        .like('tipo', 'merma%').gte('fecha', `${filtroFecha}T00:00:00`).lte('fecha', `${filtroFecha}T23:59:59`)
-        .order('fecha', { ascending: false }),
+    let qMermas = supabase.from('inventario_movimientos')
+      .select('id, tipo, cantidad, nota, fecha, producto_id, sucursal_id, productos(nombre)')
+      .filter('tipo', 'like', 'merma%')
+      .gte('fecha', `${filtroFecha}T00:00:00`)
+      .lte('fecha', `${filtroFecha}T23:59:59`)
+      .order('fecha', { ascending: false })
+
+    if (sucursalActivaId) qMermas = qMermas.eq('sucursal_id', sucursalActivaId)
+
+    const [{ data: mv, error }, { data: prods }] = await Promise.all([
+      qMermas,
       supabase.from('productos').select('id, nombre, stock_actual').eq('activo', true).order('nombre'),
     ])
+
+    if (error) { console.error('Mermas error:', error); toast('Error cargando mermas', 'err') }
     setMermas(mv ?? [])
     setProductos(prods ?? [])
   }
 
   async function registrar() {
     const { error } = await supabase.rpc('registrar_merma', {
-      p_producto_id: form.producto_id, p_subtipo: form.tipo, p_cantidad: Number(form.cantidad), p_nota: form.nota,
+      p_producto_id: form.producto_id, p_subtipo: form.tipo,
+      p_cantidad: Number(form.cantidad), p_nota: form.nota,
     })
     if (error) { toast(error.message, 'err'); return }
     toast('Merma registrada', 'ok')
@@ -46,7 +58,7 @@ export default function Mermas() {
   return (
     <div className="page-wrap">
       <div className="toolbar-wrap" style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, flex: 1, minWidth: 180 }}>Mermas y pérdidas</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 700, flex: 1 }}>Mermas y pérdidas</h2>
         <input type="date" className="form-input" style={{ width: 'auto' }} value={filtroFecha} onChange={e => setFiltroFecha(e.target.value)} />
         <button className="btn-primary" onClick={() => setModal(true)}>+ Registrar merma</button>
       </div>
@@ -54,7 +66,7 @@ export default function Mermas() {
       <div className="grid-2">
         <div>
           <div style={{ background: 'var(--err-bg)', borderRadius: 10, padding: '12px 18px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--err)', flexWrap: 'wrap', gap: 8 }}>
-            <span style={{ fontSize: 13 }}>Total unidades perdidas</span>
+            <span style={{ fontSize: 13 }}>Total unidades perdidas hoy</span>
             <span style={{ fontSize: 22, fontWeight: 700 }}>{totalUnidades}</span>
           </div>
           <div className="card" style={{ overflow: 'hidden' }}>
@@ -82,10 +94,11 @@ export default function Mermas() {
         <div className="card" style={{ padding: 20, alignSelf: 'start' }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Por tipo</h3>
           {Object.entries(resumen).length === 0
-            ? <p style={{ color: 'var(--text-soft)', fontSize: 13 }}>Sin mermas</p>
+            ? <p style={{ color: 'var(--text-soft)', fontSize: 13 }}>Sin mermas hoy</p>
             : Object.entries(resumen).map(([tipo, cant]) => (
               <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--silver-light)', fontSize: 13 }}>
-                <span>{TIPOS[tipo] ?? tipo}</span><span style={{ fontWeight: 600, color: 'var(--err)' }}>{cant} unid.</span>
+                <span>{TIPOS[tipo] ?? tipo}</span>
+                <span style={{ fontWeight: 600, color: 'var(--err)' }}>{cant} unid.</span>
               </div>
             ))}
         </div>

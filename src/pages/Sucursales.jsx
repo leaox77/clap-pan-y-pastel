@@ -31,9 +31,24 @@ export default function Sucursales() {
   }
 
   async function toggleActivo(s) {
-    await supabase.from('sucursales').update({ activo: !s.activo }).eq('id', s.id)
-    fetchData()
+  const { error } = await supabase
+    .from('sucursales')
+    .update({ activo: !s.activo })
+    .eq('id', s.id)
+
+  if (error) {
+    console.error('Error cambiando estado de sucursal:', error)
+    toast(error.message, 'err')
+    return
   }
+
+  toast(
+    s.activo ? 'Sucursal desactivada' : 'Sucursal activada',
+    'ok'
+  )
+
+  fetchData()
+}
 
   function abrirEditar(s) {
     setEditando(s); setForm({ nombre: s.nombre, direccion: s.direccion ?? '' }); setModal(true)
