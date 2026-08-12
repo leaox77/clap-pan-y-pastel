@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useToast } from '../context/ToastContext'
+import { useSucursal } from '../context/SucursalContext'
 import Modal from '../components/Modal'
 
 const MEDIOS = ['efectivo', 'qr']
@@ -44,22 +45,36 @@ export default function Ventas() {
   const cambioOtros = recibidoOtros - totalOtros
   const totalReserva = reservaItems.reduce((s, i) => s + (i.precio_unitario ?? 0) * (i.cantidad ?? 0), 0)
 
+  const { sucursalActivaId } = useSucursal()
+
   const prodsFiltrados = useMemo(() =>
     productos.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
   , [productos, busqueda])
 
-  useEffect(() => { fetchInit() }, [])
+  useEffect(() => { if (sucursalActivaId) fetchInit() }, [sucursalActivaId])
 
   async function fetchInit() {
+    if (!sucursalActivaId) return
     const hoy = new Date().toISOString().split('T')[0]
-    const [{ data: prods }, { data: sesion }, { data: hist }] = await Promise.all([
-      supabase.from('productos_pos').select('*').eq('activo_en_pos', true).order('nombre'),
-      supabase.from('caja_sesiones').select('id').eq('estado', 'abierta').limit(1).maybeSingle(),
-      supabase.from('ventas').select('id,total,medio_pago,fecha,estado').gte('fecha', hoy).order('fecha', { ascending: false }).limit(15),
+    const [{ data: inv, error: invError }, { data: sesion }, { data: hist }] = await Promise.all([
+      supabase.from('inventario_sucursal').select('producto_id,stock_actual,stock_minimo,productos!inner(id,nombre,precio_venta,costo_unitario,activo_en_pos,es_pan)').eq('sucursal_id', sucursalActivaId).eq('productos.activo_en_pos', true),
+      supabase.from('caja_sesiones').select('id').eq('estado', 'abierta').eq('sucursal_id', sucursalActivaId).limit(1).maybeSingle(),
+      supabase.from('ventas').select('id,total,medio_pago,fecha,estado,profiles(full_name)').eq('sucursal_id', sucursalActivaId).gte('fecha', hoy).order('fecha', { ascending: false }).limit(15),
     ])
-    const all = prods ?? []
-    setPanProducto(all.find(p => p.es_pan) ?? null)
-    setProductos(all.filter(p => !p.es_pan))
+
+    if (invError) {
+      console.error('Error cargando inventario POS:', invError)
+      toast(invError.message, 'err')
+      return
+    }
+
+    const all = (inv ?? []).map(i => ({ ...i.productos, stock_actual: Number(i.stock_actual ?? 0), stock_minimo: Number(i.stock_minimo ?? 0) })).sort((a, b) => String(a.nombre ?? '').localeCompare(String(b.nombre ?? ''), 'es'))
+
+    const panes = all.filter(p => p.es_pan)
+    const otros = all.filter(p => !p.es_pan)
+
+    setPanProducto(panes[0] ?? null)
+    setProductos(otros)
     setCajaSesionId(sesion?.id ?? null)
     setHistorial(hist ?? [])
   }
@@ -180,7 +195,7 @@ export default function Ventas() {
 
           <div className="card" style={{ padding: 28, textAlign: 'center', marginBottom: 16 }}>
             <p style={{ fontSize: 12, color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 12 }}>
-              {panProducto?.nombre ?? 'Pan'} — Bs {precioUnitarioPan.toFixed(2)} c/u
+              Pan — Bs {precioUnitarioPan.toFixed(2)} c/u
             </p>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24, marginBottom: 16 }}>
               <button onClick={() => setCantPan(c => Math.max(0, c - 1))} style={{ width: 60, height: 60, borderRadius: 16, border: '2px solid var(--silver-light)', background: 'none', fontSize: 30, cursor: 'pointer', fontWeight: 700 }}>−</button>
@@ -346,15 +361,16 @@ export default function Ventas() {
         <div className="card" style={{ overflow: 'hidden' }}>
           <div className="table-scroll">
             <table className="clap-table">
-              <thead><tr><th>Hora</th><th>Total</th><th>Medio</th><th>Estado</th></tr></thead>
+              <thead><tr><th>Hora</th><th>Total</th><th>Medio</th><th>Vendedor</th><th>Estado</th></tr></thead>
               <tbody>
                 {historial.length === 0
-                  ? <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-soft)', padding: 24 }}>Sin ventas hoy</td></tr>
+                  ? <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-soft)', padding: 24 }}>Sin ventas hoy</td></tr>
                   : historial.map(v => (
                     <tr key={v.id}>
                       <td style={{ color: 'var(--text-soft)' }}>{new Date(v.fecha).toLocaleTimeString('es-BO',{hour:'2-digit',minute:'2-digit'})}</td>
                       <td style={{ fontWeight: 700 }}>Bs {Number(v.total).toFixed(2)}</td>
                       <td><span className="badge-info">{v.medio_pago}</span></td>
+                      <td style={{ color: 'var(--text-soft)', fontSize: 12 }}>{v.profiles?.full_name ?? '—'}</td>
                       <td><span className={v.estado==='anulada'?'badge-err':'badge-ok'}>{v.estado}</span></td>
                     </tr>
                   ))}

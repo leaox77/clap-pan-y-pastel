@@ -100,7 +100,7 @@ export default function Caja() {
   // Apertura
   const [denom, setDenom] = useState({})
   const [cajasPan, setCajasPan] = useState('')
-  const [panesCaja, setPanesCaja] = useState(90)
+  const [panDetalle, setPanDetalle] = useState([])
   const [panSobrAnterior, setPanSobrAnterior] = useState(0)
   const [tipoTurno, setTipoTurno] = useState('manana')
   const [sobraantesConfirmados, setSobraantesConfirmados] = useState([])
@@ -150,6 +150,12 @@ export default function Caja() {
 
     fetchData()
   }, [sucursalActivaId])
+
+  function cambiarCajasPan(valor) {
+    const cantidad = Math.max(0, Number(valor) || 0)
+    setCajasPan(valor)
+    setPanDetalle(actual => Array.from({ length: cantidad }, (_, i) => actual[i] ?? { producto_id: '', cantidad: '' }))
+  }
 
   async function fetchData() {
     if (!sucursalActivaId) return
@@ -427,152 +433,32 @@ export default function Caja() {
    * ============================================================
    */
   async function abrirCaja() {
-    if (!sucursalActivaId) {
-      toast(
-        'No hay una sucursal seleccionada',
-        'err'
-      )
-      return
-    }
+    if (!sucursalActivaId) { toast('No hay una sucursal seleccionada', 'err'); return }
 
     const monto = totalDenoms(denom)
 
-    /*
-    * Procesar mermas de sobrantes.
-    */
     for (const s of sobraantesConfirmados) {
       if (!s.esmerma) continue
-
-      if (!s.motivo_merma?.trim()) {
-        toast(
-          `Escribe el motivo de merma para "${s.producto_nombre}"`,
-          'warn'
-        )
-        return
-      }
-
-      const { error } =
-        await supabase.rpc(
-          'sobrante_a_merma',
-          {
-            p_sobrante_id: s.id,
-            p_motivo: s.motivo_merma,
-          }
-        )
-
-      if (error) {
-        console.error(
-          'Error procesando merma:',
-          error
-        )
-
-        toast(
-          error.message,
-          'err'
-        )
-
-        return
-      }
+      if (!s.motivo_merma?.trim()) { toast(`Escribe el motivo de la merma para "${s.producto_nombre}"`, 'warn'); return }
+      const { error } = await supabase.rpc('sobrante_a_merma', { p_sobrante_id: s.id, p_motivo: s.motivo_merma })
+      if (error) { toast(error.message, 'err'); return }
     }
 
-    /*
-    * Abrir caja.
-    */
-    const {
-      data,
-      error,
-    } = await supabase.rpc(
-      'abrir_caja',
-      {
-        p_monto: monto,
-        p_denominaciones: denom,
-        p_tipo_turno: tipoTurno,
+    const detalleValido = panDetalle.filter(c => c.producto_id && Number(c.cantidad) > 0)
+    const { data, error } = await supabase.rpc('abrir_caja', { p_monto: monto, p_denominaciones: denom, p_tipo_turno: tipoTurno, p_cajas_pan: detalleValido.length, p_panes_por_caja: 0, p_pan_sobrante_anterior: Number(panSobrAnterior) || 0, p_sesion_anterior_id: sesionAnterior?.id ?? null, p_sobrantes_confirmados: sobraantesConfirmados.filter(s => s.incluir !== false && !s.esmerma).map(s => ({ id: s.id, producto_id: s.producto_id, cantidad_recibida: Number(s.cantidad_recibida) })), p_sucursal_id: sucursalActivaId })
 
-        p_cajas_pan:
-          Number(cajasPan) || 0,
+    if (error) { toast(error.message, 'err'); return }
 
-        p_panes_por_caja:
-          Number(panesCaja) || 90,
+    const { error: panError } = await supabase.rpc('registrar_pan_apertura', { p_caja_sesion_id: data, p_detalle: detalleValido.map(c => ({ producto_id: c.producto_id, cantidad: Number(c.cantidad) })) })
 
-        p_pan_sobrante_anterior:
-          Number(panSobrAnterior) || 0,
+    if (panError) { toast(`Caja abierta, pero no se pudo registrar el detalle del pan: ${panError.message}`, 'err'); return }
 
-        p_sesion_anterior_id:
-          sesionAnterior?.id ?? null,
-
-        p_sobrantes_confirmados:
-          sobraantesConfirmados
-            .filter(
-              s =>
-                s.incluir !== false &&
-                !s.esmerma
-            )
-            .map(s => ({
-              id: s.id,
-              producto_id:
-                s.producto_id,
-              cantidad_recibida:
-                Number(
-                  s.cantidad_recibida
-                ),
-            })),
-
-        /*
-        * IMPORTANTE:
-        * administrador/propietaria utilizan
-        * la sucursal seleccionada.
-        *
-        * cajero será validado nuevamente
-        * en el RPC usando su perfil.
-        */
-        p_sucursal_id:
-          sucursalActivaId,
-      }
-    )
-
-    if (error) {
-      console.error(
-        'Error abriendo caja:',
-        error
-      )
-
-      toast(
-        error.message,
-        'err'
-      )
-
-      return
-    }
-
-    console.log(
-      'Caja abierta:',
-      data,
-      'Sucursal:',
-      sucursalActivaId
-    )
-
-    const totalPan =
-      (Number(cajasPan) || 0) *
-        (Number(panesCaja) || 90)
-      +
-      (Number(panSobrAnterior) || 0)
-
-    toast(
-      `Turno ${
-        tipoTurno === 'manana'
-          ? '☀️ mañana'
-          : '🌙 tarde'
-      } iniciado${
-        totalPan > 0
-          ? ` — ${totalPan} panes`
-          : ''
-      }`,
-      'ok'
-    )
-
+    const totalPan = detalleValido.reduce((s, c) => s + Number(c.cantidad), 0) + (Number(panSobrAnterior) || 0)
+    toast(`Turno ${tipoTurno === 'manana' ? '☀️ mañana' : '🌙 tarde'} iniciado${totalPan > 0 ? ` — ${totalPan} panes` : ''}`, 'ok')
     setStep('idle')
     setDenom({})
-
+    setCajasPan('')
+    setPanDetalle([])
     await fetchData()
   }
 
@@ -1783,135 +1669,26 @@ export default function Caja() {
 
         {/* PAN */}
 
-        <div
-          className="card"
-          style={{
-            padding: 14,
-            marginBottom: 16
-          }}
-        >
-          <p
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              marginBottom: 12
-            }}
-          >
-            🍞 Pan recibido hoy
-          </p>
+        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>🍞 Pan recibido hoy</p>
+          <label className="form-label">Cajas recibidas</label>
+          <input className="form-input" type="number" min="0" value={cajasPan} onChange={e => cambiarCajasPan(e.target.value)} placeholder="0" style={{ marginBottom: 12, textAlign: 'center', fontWeight: 700, fontSize: 18 }} />
 
-          <div
-            className="grid-3"
-            style={{
-              gap: 10,
-              marginBottom: 10
-            }}
-          >
-            <div>
-              <label className="form-label">
-                Cajas recibidas
-              </label>
-
-              <input
-                className="form-input"
-                type="number"
-                value={cajasPan}
-                onChange={e =>
-                  setCajasPan(
-                    e.target.value
-                  )
-                }
-                placeholder="0"
-                style={{
-                  textAlign:
-                    'center',
-                  fontWeight: 700,
-                  fontSize: 18
-                }}
-              />
+          {panDetalle.map((caja, idx) => (
+            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 32px', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <select className="form-input form-select" value={caja.producto_id} onChange={e => setPanDetalle(arr => arr.map((x, i) => i === idx ? { ...x, producto_id: e.target.value } : x))}>
+                <option value="">Caja {idx + 1} — seleccionar pan</option>
+                {productos.filter(p => p.es_pan && Number(p.precio_venta) === 0.80 && p.nombre !== 'Pan' && !p.nombre.toLowerCase().includes('chama')).map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+              </select>
+              <input className="form-input" type="number" min="1" placeholder="Unidades" value={caja.cantidad} onChange={e => setPanDetalle(arr => arr.map((x, i) => i === idx ? { ...x, cantidad: e.target.value } : x))} />
+              <span style={{ fontSize: 11, color: 'var(--text-soft)', textAlign: 'center' }}>#{idx + 1}</span>
             </div>
+          ))}
 
-            <div>
-              <label className="form-label">
-                Panes / caja
-              </label>
-
-              <input
-                className="form-input"
-                type="number"
-                value={panesCaja}
-                onChange={e =>
-                  setPanesCaja(
-                    e.target.value
-                  )
-                }
-                style={{
-                  textAlign:
-                    'center',
-                  fontWeight: 700,
-                  fontSize: 18
-                }}
-              />
-            </div>
-
-            <div>
-              <label className="form-label">
-                Pan sobrante
-              </label>
-
-              <input
-                className="form-input"
-                type="number"
-                value={panSobrAnterior}
-                onChange={e =>
-                  setPanSobrAnterior(
-                    e.target.value
-                  )
-                }
-                style={{
-                  textAlign:
-                    'center',
-                  fontWeight: 700,
-                  fontSize: 18
-                }}
-              />
-            </div>
-          </div>
-
-          {(Number(cajasPan) > 0 ||
-            Number(
-              panSobrAnterior
-            ) > 0) && (
-            <div
-              style={{
-                background:
-                  'var(--yellow-soft)',
-                borderRadius: 8,
-                padding:
-                  '8px 12px',
-                display:
-                  'flex',
-                justifyContent:
-                  'space-between',
-                fontWeight: 800,
-                fontSize: 16
-              }}
-            >
-              <span>
-                Total panes
-              </span>
-
-              <span>
-                {(Number(
-                  cajasPan
-                ) || 0) *
-                  (Number(
-                    panesCaja
-                  ) || 90) +
-                  (Number(
-                    panSobrAnterior
-                  ) || 0)}
-              </span>
+          {panDetalle.length > 0 && (
+            <div style={{ background: 'var(--yellow-soft)', borderRadius: 8, padding: '8px 12px', display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 16, marginTop: 10 }}>
+              <span>Total panes</span>
+              <span>{panDetalle.reduce((s, c) => s + (Number(c.cantidad) || 0), 0)}</span>
             </div>
           )}
         </div>
@@ -2175,50 +1952,45 @@ export default function Caja() {
         </div>
 
         {/* PAN SOBRANTE */}
+        <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+          <label className="form-label">🍞 Panes sobrantes al cerrar (total)</label>
+          <input className="form-input" type="number" value={panSobrCierre}
+            onChange={e => setPanSobrCierre(e.target.value)}
+            placeholder="0" style={{ textAlign: 'center', fontWeight: 800, fontSize: 22, marginBottom: 10 }} />
 
-        <div
-          className="card"
-          style={{
-            padding: 12,
-            marginBottom: 12
-          }}
-        >
-          <label className="form-label">
-            🍞 Panes sobrantes al
-            cerrar
-          </label>
-
-          <input
-            className="form-input"
-            type="number"
-            value={panSobrCierre}
-            onChange={e =>
-              setPanSobrCierre(
-                e.target.value
-              )
-            }
-            placeholder="0"
-            style={{
-              textAlign:
-                'center',
-              fontWeight: 800,
-              fontSize: 22,
-              marginBottom: 6
-            }}
-          />
-
-          <p
-            style={{
-              fontSize: 11,
-              color:
-                'var(--text-soft)'
-            }}
-          >
-            {sesion?.tipo_turno ===
-            'tarde'
-              ? 'Pasarán al turno mañana del próximo día'
-              : 'Pasarán al turno tarde de hoy'}
-          </p>
+          {/* Desglose por tipo de pan */}
+          {productos.filter(p => !p.es_pan && String(p.nombre ?? '').toLowerCase().startsWith('pan')).length > 0 && (
+            <div>
+              <p style={{ fontSize: 11, color: 'var(--text-soft)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                Desglose por tipo (opcional)
+              </p>
+              {productos
+                .filter(p => !p.es_pan && String(p.nombre ?? '').toLowerCase().startsWith('pan'))
+                .map(p => (
+                  <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                    <span style={{ flex: 1, fontSize: 13 }}>{p.nombre}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-soft)', minWidth: 70 }}>
+                      Stock: {p.stock_actual}
+                    </span>
+                    <input type="number" className="form-input" style={{ width: 80, textAlign: 'center' }}
+                      placeholder="0"
+                      value={sobraantesCierre.find(s => s.producto_id === p.id)?.cantidad ?? ''}
+                      onChange={e => {
+                        const val = e.target.value
+                        setSobraantesCierre(arr => {
+                          const exists = arr.find(s => s.producto_id === p.id)
+                          if (!val) return arr.filter(s => s.producto_id !== p.id)
+                          if (exists) return arr.map(s => s.producto_id === p.id ? { ...s, cantidad: val } : s)
+                          return [...arr, { producto_id: p.id, cantidad: val }]
+                        })
+                      }} />
+                  </div>
+                ))}
+              <p style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 6 }}>
+                {sesion?.tipo_turno === 'tarde' ? 'Pasarán al turno mañana del próximo día' : 'Pasarán al turno tarde de hoy'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* SOBRANTES */}
