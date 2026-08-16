@@ -392,73 +392,82 @@ export default function Caja() {
 
   async function abrirCaja() {
     if (!sucursalActivaId) {
-      toast('No hay una sucursal seleccionada', 'err')
-      return
+        toast('No hay una sucursal seleccionada', 'err')
+        return
     }
 
     const monto = totalDenoms(denom)
 
     // Validar que todas las cajas tengan producto y cantidad
     for (const caja of cajasPan) {
-      if (!caja.producto_id) {
-        toast('Todos los tipos de pan deben estar seleccionados', 'warn')
-        return
-      }
-      if (!caja.cantidad || Number(caja.cantidad) <= 0) {
-        toast('Todas las cajas deben tener una cantidad válida', 'warn')
-        return
-      }
+        if (!caja.producto_id) {
+            toast('Todos los tipos de pan deben estar seleccionados', 'warn')
+            return
+        }
+        if (!caja.cantidad || Number(caja.cantidad) <= 0) {
+            toast('Todas las cajas deben tener una cantidad válida', 'warn')
+            return
+        }
     }
 
     // Procesar mermas de sobrantes
     for (const s of sobraantesConfirmados) {
-      if (!s.esmerma) continue
+        if (!s.esmerma) continue
 
-      if (!s.motivo_merma?.trim()) {
-        toast(`Escribe el motivo de merma para "${s.producto_nombre}"`, 'warn')
-        return
-      }
+        if (!s.motivo_merma?.trim()) {
+            toast(`Escribe el motivo de merma para "${s.producto_nombre}"`, 'warn')
+            return
+        }
 
-      const { error } = await supabase.rpc('sobrante_a_merma', {
-        p_sobrante_id: s.id,
-        p_motivo: s.motivo_merma,
-      })
+        const { error } = await supabase.rpc('sobrante_a_merma', {
+            p_sobrante_id: s.id,
+            p_motivo: s.motivo_merma,
+        })
 
-      if (error) {
-        console.error('Error procesando merma:', error)
-        toast(error.message, 'err')
-        return
-      }
+        if (error) {
+            console.error('Error procesando merma:', error)
+            toast(error.message, 'err')
+            return
+        }
     }
 
-    // Preparar datos de cajas de pan
+    // Preparar datos de cajas de pan (para stock)
     const cajasPanData = cajasPan.map(c => ({
-      producto_id: c.producto_id,
-      cantidad: Number(c.cantidad)
+        producto_id: c.producto_id,
+        cantidad: Number(c.cantidad)
     }))
 
-    // Abrir caja
+    // Preparar datos de panes por caja (para registro/detalle)
+    const panesPorCajaData = cajasPan.map((c, index) => ({
+        caja_numero: index + 1,
+        producto_id: c.producto_id,
+        producto_nombre: productosPan.find(p => p.id === c.producto_id)?.nombre || 'Desconocido',
+        cantidad: Number(c.cantidad)
+    }))
+
+    // Abrir caja - AHORA CON TODOS LOS PARÁMETROS
     const { data, error } = await supabase.rpc('abrir_caja', {
-      p_monto: monto,
-      p_denominaciones: denom,
-      p_tipo_turno: tipoTurno,
-      p_cajas_pan: cajasPanData,
-      p_pan_sobrante_anterior: Number(panSobrAnterior) || 0,
-      p_sesion_anterior_id: sesionAnterior?.id ?? null,
-      p_sobrantes_confirmados: sobraantesConfirmados
-        .filter(s => s.incluir !== false && !s.esmerma)
-        .map(s => ({
-          id: s.id,
-          producto_id: s.producto_id,
-          cantidad_recibida: Number(s.cantidad_recibida),
-        })),
-      p_sucursal_id: sucursalActivaId,
+        p_cajas_pan: cajasPanData,           // Para stock
+        p_denominaciones: denom,              // Conteo de dinero
+        p_monto: monto,                       // Monto total
+        p_pan_sobrante_anterior: Number(panSobrAnterior) || 0,  // Pan sobrante
+        p_panes_por_caja: panesPorCajaData,   // 👈 NUEVO: Detalle de cajas
+        p_sesion_anterior_id: sesionAnterior?.id ?? null,
+        p_sobrantes_confirmados: sobraantesConfirmados
+            .filter(s => s.incluir !== false && !s.esmerma)
+            .map(s => ({
+                id: s.id,
+                producto_id: s.producto_id,
+                cantidad_recibida: Number(s.cantidad_recibida),
+            })),
+        p_sucursal_id: sucursalActivaId,
+        p_tipo_turno: tipoTurno,
     })
 
     if (error) {
-      console.error('Error abriendo caja:', error)
-      toast(error.message, 'err')
-      return
+        console.error('Error abriendo caja:', error)
+        toast(error.message, 'err')
+        return
     }
 
     toast(`Turno ${tipoTurno === 'manana' ? '☀️ mañana' : '🌙 tarde'} iniciado — ${totalPanes} panes`, 'ok')
@@ -468,7 +477,7 @@ export default function Caja() {
     setCajasPan([])
     setNumCajas('')
     await fetchData()
-  }
+}
 
   async function cerrarCaja() {
     if (!sesion) {
