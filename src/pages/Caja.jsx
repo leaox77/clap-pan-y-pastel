@@ -5,6 +5,50 @@ import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
 import { useSucursal } from '../context/SucursalContext'
 
+// ============================================================
+// FUNCIONES DE FECHA PARA BOLIVIA (UTC-4)
+// ============================================================
+
+// Obtener la fecha actual de Bolivia en formato Date
+function getBoliviaDate() {
+  const now = new Date()
+  // Bolivia está en UTC-4
+  const boliviaTime = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) - 4 * 3600000)
+  return boliviaTime
+}
+
+// Obtener la fecha de Bolivia en formato YYYY-MM-DD
+function getBoliviaDateString() {
+  const boliviaDate = getBoliviaDate()
+  return boliviaDate.toISOString().split('T')[0]
+}
+
+// Obtener el timestamp de Bolivia en formato ISO
+// Obtener timestamp de Bolivia en formato para PostgreSQL
+// Función que obtiene la hora actual de Bolivia como string para PostgreSQL
+function getBoliviaTimestampForDB() {
+  // Crear fecha en Bolivia usando la zona horaria del navegador
+  const now = new Date()
+  // Obtener el offset actual del navegador y ajustar a UTC-4
+  const offset = now.getTimezoneOffset() // en minutos
+  const boliviaOffset = -240 // UTC-4 en minutos
+  const diffMinutes = boliviaOffset - offset
+  const boliviaTime = new Date(now.getTime() + diffMinutes * 60000)
+  
+  // Formatear para PostgreSQL
+  return boliviaTime.toISOString().replace('T', ' ').slice(0, 19)
+}
+
+function formatBoliviaTime(timestamp) {
+  if (!timestamp) return '--:--'
+  const date = new Date(timestamp)
+  const hours = String(date.getUTCHours()).padStart(2, '0')
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+// ============================================================
+
 const DENOMS = [200, 100, 50, 20, 10, 5, 2, 1, 0.50, 0.20, 0.10]
 
 function totalDenoms(d) {
@@ -87,12 +131,12 @@ export default function Caja() {
 
   // Apertura
   const [denom, setDenom] = useState({})
-  const [cajasPan, setCajasPan] = useState([]) // Array de { producto_id, cantidad }
-  const [numCajas, setNumCajas] = useState('') // Número de cajas a agregar
+  const [cajasPan, setCajasPan] = useState([])
+  const [numCajas, setNumCajas] = useState('')
   const [panSobrAnterior, setPanSobrAnterior] = useState(0)
   const [tipoTurno, setTipoTurno] = useState('manana')
   const [sobraantesConfirmados, setSobraantesConfirmados] = useState([])
-  const [productosPan, setProductosPan] = useState([]) // Solo productos que son pan
+  const [productosPan, setProductosPan] = useState([])
 
   // Cierre
   const [denomCierre, setDenomCierre] = useState({})
@@ -189,7 +233,6 @@ export default function Caja() {
 
       setProductos(productosNormalizados)
       
-      // Filtrar solo productos que son pan
       const panes = productosNormalizados.filter(p => p.es_pan === true)
       setProductosPan(panes)
 
@@ -218,7 +261,23 @@ export default function Caja() {
         // Ventas del turno
         const { data: ventasSesion, error: ventasSesionError } = await supabase
           .from('ventas')
-          .select('id,total,medio_pago,fecha,estado')
+          .select(`
+            id,
+            total,
+            medio_pago,
+            fecha,
+            estado,
+            venta_items (
+              ganancia,
+              subtotal,
+              cantidad,
+              producto_id,
+              productos (
+                nombre,
+                es_pan
+              )
+            )
+          `)
           .eq('caja_sesion_id', s.id)
           .eq('estado', 'completada')
           .order('fecha', { ascending: false })
@@ -229,7 +288,7 @@ export default function Caja() {
         if (idsVentas.length) {
           const { data: itemsSesion, error: itemsSesionError } = await supabase
             .from('venta_items')
-            .select('venta_id,producto_id,cantidad,subtotal,productos(nombre,es_pan)')
+            .select('venta_id,producto_id,cantidad,subtotal,ganancia,productos(nombre,es_pan)')
             .in('venta_id', idsVentas)
 
           if (itemsSesionError) console.error('Error cargando detalle de ventas:', itemsSesionError)
@@ -260,11 +319,13 @@ export default function Caja() {
         return
       }
 
-      // 4. NO HAY CAJA ABIERTA
-      const ayer = new Date()
-      ayer.setDate(ayer.getDate() - 1)
-      const ayerStr = ayer.toISOString().split('T')[0]
-      const hoyStr = new Date().toISOString().split('T')[0]
+      // 4. NO HAY CAJA ABIERTA - Usar fechas de Bolivia
+      const hoyStr = getBoliviaDateString()
+      
+      // Calcular ayer en Bolivia
+      const ayerDate = getBoliviaDate()
+      ayerDate.setDate(ayerDate.getDate() - 1)
+      const ayerStr = ayerDate.toISOString().split('T')[0]
 
       // Sobrantes pendientes
       const { data: sob, error: sobError } = await supabase
@@ -307,15 +368,17 @@ export default function Caja() {
         }))
       )
 
-      // DETERMINAR TURNO AUTOMÁTICAMENTE
+      // DETERMINAR TURNO AUTOMÁTICAMENTE usando fechas de Bolivia
       if (ultima) {
         setSesionAnterior(ultima)
 
-        // Obtener el pan sobrante del turno anterior
         const panSobrante = Number(ultima.pan_sobrante_cierre ?? 0)
         setPanSobrAnterior(panSobrante)
 
-        const fechaCierre = ultima.fecha_cierre ? new Date(ultima.fecha_cierre).toISOString().split('T')[0] : null
+        // Convertir fecha de cierre a Bolivia para comparar
+        const fechaCierre = ultima.fecha_cierre 
+          ? new Date(ultima.fecha_cierre).toISOString().split('T')[0] 
+          : null
 
         if (ultima.tipo_turno === 'manana') {
           if (fechaCierre === hoyStr) {
@@ -323,21 +386,21 @@ export default function Caja() {
             setTipoTurno('tarde')
             setTurnoBloqueado(false)
           } else {
-            // Turno mañana cerrado en día anterior → se puede abrir mañana (nuevo día)
+            // Turno mañana cerrado en día anterior → se puede abrir mañana
             setTipoTurno('manana')
             setTurnoBloqueado(false)
           }
         } else if (ultima.tipo_turno === 'tarde') {
-          if (fechaCierre === hoyStr) {
-            // Turno tarde cerrado hoy → se puede abrir mañana (nuevo día)
+          //if (fechaCierre === hoyStr) {
+            // Turno tarde cerrado hoy → se puede abrir mañana
             setTipoTurno('manana')
             setTurnoBloqueado(false)
-          } else {
+          /*} else {
             // Turno tarde cerrado en día anterior → hay problema
             setTipoTurno('manana')
             setTurnoBloqueado(true)
             toast('El turno tarde del día anterior no fue cerrado. Revisa la caja.', 'warn')
-          }
+          }*/
         }
       } else {
         // No hay sesión anterior → comenzar con mañana
@@ -445,13 +508,16 @@ export default function Caja() {
         cantidad: Number(c.cantidad)
     }))
 
+    // 🔥 CORRECCIÓN: Obtener timestamp de Bolivia para la apertura
+    const timestampBolivia = getBoliviaTimestampForDB() 
+
     // Abrir caja - AHORA CON TODOS LOS PARÁMETROS
     const { data, error } = await supabase.rpc('abrir_caja', {
-        p_cajas_pan: cajasPanData,           // Para stock
-        p_denominaciones: denom,              // Conteo de dinero
-        p_monto: monto,                       // Monto total
-        p_pan_sobrante_anterior: Number(panSobrAnterior) || 0,  // Pan sobrante
-        p_panes_por_caja: panesPorCajaData,   // 👈 NUEVO: Detalle de cajas
+        p_cajas_pan: cajasPanData,
+        p_denominaciones: denom,
+        p_monto: monto,
+        p_pan_sobrante_anterior: Number(panSobrAnterior) || 0,
+        p_panes_por_caja: panesPorCajaData,
         p_sesion_anterior_id: sesionAnterior?.id ?? null,
         p_sobrantes_confirmados: sobraantesConfirmados
             .filter(s => s.incluir !== false && !s.esmerma)
@@ -462,6 +528,7 @@ export default function Caja() {
             })),
         p_sucursal_id: sucursalActivaId,
         p_tipo_turno: tipoTurno,
+        p_fecha_apertura: timestampBolivia, // 🔥 NUEVO: pasar la fecha de Bolivia
     })
 
     if (error) {
@@ -477,7 +544,7 @@ export default function Caja() {
     setCajasPan([])
     setNumCajas('')
     await fetchData()
-}
+  }
 
   async function cerrarCaja() {
     if (!sesion) {
@@ -494,6 +561,9 @@ export default function Caja() {
 
     const sobFiltrados = sobraantesCierre.filter(s => s.producto_id && Number(s.cantidad) > 0)
 
+    // 🔥 CORRECCIÓN: Obtener timestamp de Bolivia para el cierre
+    const timestampBolivia = getBoliviaTimestampForDB() 
+
     const { data, error } = await supabase.rpc('cerrar_caja', {
       p_caja_sesion_id: sesion.id,
       p_monto_fisico: montoFisico,
@@ -506,6 +576,7 @@ export default function Caja() {
         producto_nombre: productos.find(p => p.id === s.producto_id)?.nombre ?? s.producto_id,
         cantidad: Number(s.cantidad),
       })),
+      p_fecha_cierre: timestampBolivia, // 🔥 NUEVO: pasar la fecha de Bolivia
     })
 
     if (error) {
@@ -735,9 +806,15 @@ export default function Caja() {
               {Object.entries(
                 ventasTurno.flatMap(v => v.items || []).reduce((acc, i) => {
                   const n = i.productos?.nombre ?? 'Producto'
-                  if (!acc[n]) acc[n] = { cantidad: 0, total: 0, es_pan: !!i.productos?.es_pan }
+                  if (!acc[n]) acc[n] = { 
+                    cantidad: 0, 
+                    total: 0, 
+                    ganancia: 0,  // 👈 NUEV
+                    es_pan: !!i.productos?.es_pan 
+                  }
                   acc[n].cantidad += Number(i.cantidad || 0)
                   acc[n].total += Number(i.subtotal || 0)
+                  acc[n].ganancia += Number(i.ganancia || 0)  
                   return acc
                 }, {})
               )
@@ -745,12 +822,25 @@ export default function Caja() {
                 .map(([nombre, d]) => (
                   <div key={nombre} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--silver-light)', fontSize: 13 }}>
                     <span>{d.es_pan ? '🍞 ' : ''}{nombre}</span>
-                    <span style={{ fontWeight: 700 }}>{d.cantidad} unid. · Bs {d.total.toFixed(2)}</span>
+                    <span style={{ fontWeight: 700 }}>
+                      {d.cantidad} unid. · Bs {d.total.toFixed(2)}
+                      <span style={{ color: 'var(--ok)', fontSize: 11, marginLeft: 8 }}>
+                        (ganancia: Bs {d.ganancia.toFixed(2)}) 
+                      </span>
+                    </span>
                   </div>
                 ))}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, fontWeight: 800 }}>
                 <span>Total vendido</span>
                 <span>Bs {ventasTurno.reduce((s, v) => s + Number(v.total || 0), 0).toFixed(2)}</span>
+              </div>
+              {/* 👈 NUEVO BLOQUE: Ganancia total del turno */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontWeight: 800, color: 'var(--ok)' }}>
+                <span>💰 Ganancia total del turno</span>
+                <span>Bs {ventasTurno.reduce((s, v) => {
+                  const gananciaVenta = (v.venta_items || []).reduce((sum, item) => sum + Number(item.ganancia || 0), 0)
+                  return s + gananciaVenta
+                }, 0).toFixed(2)}</span>
               </div>
             </div>
           )}
@@ -810,7 +900,7 @@ export default function Caja() {
                     movimientos.map(m => (
                       <tr key={m.id}>
                         <td style={{ color: 'var(--text-soft)', whiteSpace: 'nowrap' }}>
-                          {new Date(m.fecha).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}
+                          {formatBoliviaTime(m.fecha)}
                         </td>
                         <td>
                           <span className={m.tipo === 'gasto' ? 'badge-err' : m.tipo === 'reserva' ? 'badge-warn' : 'badge-ok'}>

@@ -4,8 +4,31 @@ import { supabase } from '../lib/supabaseClient'
 export default function Auditoria() {
   const [registros, setRegistros] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filtros, setFiltros] = useState({ tabla: '', usuario: '', desde: new Date().toISOString().split('T')[0], hasta: new Date().toISOString().split('T')[0] })
+  // Función para obtener fecha de Bolivia (UTC-4)
+function getBoliviaDateString() {
+  const now = new Date()
+  // Bolivia está en UTC-4
+  const boliviaTime = new Date(now.getTime() - (now.getTimezoneOffset() * 60000) - 4 * 3600000)
+  return boliviaTime.toISOString().split('T')[0]
+}
 
+// Función para obtener fecha de Bolivia con hora
+function getBoliviaDateTime() {
+  const now = new Date()
+  const boliviaTime = new Date(now.getTime() - (now.getTimezoneOffset() * 60000) - 4 * 3600000)
+  return boliviaTime
+}
+
+// En tu estado, usa la fecha de Bolivia
+const [filtros, setFiltros] = useState({ 
+  tabla: '', 
+  usuario: '', 
+  desde: getBoliviaDateString(), 
+  hasta: getBoliviaDateString() 
+})
+
+// Si necesitas la fecha con hora para otros cálculos
+const hoyBolivia = getBoliviaDateTime()
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {

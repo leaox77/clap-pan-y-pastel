@@ -11,7 +11,14 @@ export default function Gastos() {
   const [cajaSesionId, setCajaSesionId] = useState(null)
   const [modalGasto, setModalGasto] = useState(false)
   const [form, setForm] = useState({ categoria: 'Bolsas', descripcion: '', monto: '', responsable: '' })
-  const [filtroFecha, setFiltroFecha] = useState(new Date().toISOString().split('T')[0])
+  // Función para obtener fecha de Bolivia
+function getBoliviaDateString() {
+  const now = new Date()
+  const boliviaTime = new Date(now.getTime() - (now.getTimezoneOffset() * 60000) - 4 * 3600000)
+  return boliviaTime.toISOString().split('T')[0]
+}
+
+const [filtroFecha, setFiltroFecha] = useState(getBoliviaDateString())
 
   useEffect(() => { fetchData() }, [filtroFecha])
 

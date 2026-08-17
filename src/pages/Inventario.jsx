@@ -83,7 +83,7 @@ export default function Inventario() {
 
   async function abrirAuditoria(p) {
     const { data, error } = await supabase
-      .from('vista_auditoria_detallada')  // Usar la nueva vista
+      .from('vista_auditoria_detallada')
       .select('*')
       .eq('registro_id', p.id)
       .order('fecha', { ascending: false })
@@ -102,7 +102,6 @@ export default function Inventario() {
   async function guardarEdicion() {
     if (!modalEditar || !sucursalActivaId) return
 
-    // Validar que el stock no sea negativo
     if (Number(fEditar.stock_actual) < 0) {
       toast('El stock no puede ser negativo', 'err')
       return
@@ -234,12 +233,32 @@ export default function Inventario() {
     await fetchData()
   }
 
+  // Función para limpiar la búsqueda
+  const limpiarBusqueda = () => {
+    setBusqueda('')
+  }
+
+  // Filtro con búsqueda mejorada (normalización de texto)
   const filtrados = productos.filter(p => { 
     const s = Number(p.stock_actual), m = Number(p.stock_minimo)
     if (tab === 'bajo') return s > 0 && s <= m
     if (tab === 'agotado') return s <= 0
+    if (tab === 'disponible') return s > 0
     return true 
-  }).filter(p => String(p.nombre ?? '').toLowerCase().includes(busqueda.toLowerCase()))
+  }).filter(p => {
+    // Búsqueda normalizada: eliminar acentos y convertir a minúsculas
+    const nombreNormalizado = String(p.nombre ?? '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Elimina acentos
+    
+    const busquedaNormalizada = busqueda
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Elimina acentos
+    
+    return nombreNormalizado.includes(busquedaNormalizada)
+  })
 
   return (
     <div className="page-wrap">
@@ -263,12 +282,49 @@ export default function Inventario() {
       </div>
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 0, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input className="form-input" style={{ flex: 1, minWidth: 180 }} placeholder="Buscar producto..." value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+        {/* Buscador con botón de limpiar */}
+        <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
+          <input 
+            className="form-input" 
+            style={{ paddingRight: '35px' }}
+            placeholder="Buscar producto..." 
+            value={busqueda} 
+            onChange={e => setBusqueda(e.target.value)} 
+          />
+          {busqueda && (
+            <button
+              onClick={limpiarBusqueda}
+              style={{
+                position: 'absolute',
+                right: '10px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '16px',
+                color: 'var(--text-soft)',
+                padding: '4px 8px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-soft)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        
         <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--silver-light)' }}>
           {[
-            ['todos','Todos'],
-            ['bajo','Bajo stock'],
-            ['agotado','Agotados']
+            ['todos', 'Todos'],
+            ['disponible', 'Disponibles'],
+            ['bajo', 'Bajo stock'],
+            ['agotado', 'Agotados']
           ].map(([k,l]) => (
             <button 
               key={k} 
@@ -372,26 +428,46 @@ export default function Inventario() {
         </div>
       </Modal>
 
-      {/* Modal Editar */}
+      {/* Modal Editar - Mostrar campos vacíos cuando el valor es 0 */}
       <Modal open={!!modalEditar} onClose={() => setModalEditar(null)} title={`✏ Editar — ${modalEditar?.nombre}`}>
         <label className="form-label">Nombre</label>
         <input className="form-input" style={{ marginBottom: 12 }} value={fEditar.nombre ?? ''} onChange={e => setFEditar(f => ({ ...f, nombre: e.target.value }))} />
         <div className="grid-2" style={{ marginBottom: 12 }}>
           <div>
             <label className="form-label">Precio venta</label>
-            <input className="form-input" type="number" value={fEditar.precio_venta ?? ''} onChange={e => setFEditar(f => ({ ...f, precio_venta: e.target.value }))} />
+            <input 
+              className="form-input" 
+              type="number" 
+              value={fEditar.precio_venta === 0 || fEditar.precio_venta === '0' ? '' : fEditar.precio_venta ?? ''} 
+              onChange={e => setFEditar(f => ({ ...f, precio_venta: e.target.value }))} 
+            />
           </div>
           <div>
             <label className="form-label">Costo unitario</label>
-            <input className="form-input" type="number" value={fEditar.costo_unitario ?? ''} onChange={e => setFEditar(f => ({ ...f, costo_unitario: e.target.value }))} />
+            <input 
+              className="form-input" 
+              type="number" 
+              value={fEditar.costo_unitario === 0 || fEditar.costo_unitario === '0' ? '' : fEditar.costo_unitario ?? ''} 
+              onChange={e => setFEditar(f => ({ ...f, costo_unitario: e.target.value }))} 
+            />
           </div>
           <div>
             <label className="form-label">Stock actual</label>
-            <input className="form-input" type="number" value={fEditar.stock_actual ?? ''} onChange={e => setFEditar(f => ({ ...f, stock_actual: e.target.value }))} />
+            <input 
+              className="form-input" 
+              type="number" 
+              value={fEditar.stock_actual === 0 || fEditar.stock_actual === '0' ? '' : fEditar.stock_actual ?? ''} 
+              onChange={e => setFEditar(f => ({ ...f, stock_actual: e.target.value }))} 
+            />
           </div>
           <div>
             <label className="form-label">Stock mínimo</label>
-            <input className="form-input" type="number" value={fEditar.stock_minimo ?? ''} onChange={e => setFEditar(f => ({ ...f, stock_minimo: e.target.value }))} />
+            <input 
+              className="form-input" 
+              type="number" 
+              value={fEditar.stock_minimo === 0 || fEditar.stock_minimo === '0' ? '' : fEditar.stock_minimo ?? ''} 
+              onChange={e => setFEditar(f => ({ ...f, stock_minimo: e.target.value }))} 
+            />
           </div>
         </div>
         <label style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
@@ -408,7 +484,7 @@ export default function Inventario() {
         </div>
       </Modal>
 
-      {/* Modal Auditoría - Con mensajes claros */}
+      {/* Modal Auditoría */}
       <Modal open={!!modalAuditoria} onClose={() => setModalAuditoria(null)} title={`📋 Historial — ${modalAuditoria?.nombre}`}>
         {auditoria.length === 0 ? (
           <p style={{ color: 'var(--text-soft)', textAlign: 'center', padding: 20 }}>
