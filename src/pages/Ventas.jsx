@@ -49,7 +49,7 @@ export default function Ventas() {
   const totalCarrito = carrito.reduce((s, i) => s + i.precio_unitario * i.cantidad, 0)
   const cambio = recibido - totalCarrito
 
-  const totalReserva = reservaItems.reduce((s, i) => (i.precio_unitario ?? 0) * (i.cantidad ?? 0), 0)
+  const totalReserva = reservaItems.reduce((s, i) => s + (i.precio_unitario ?? 0) * (i.cantidad ?? 0), 0)
   const { sucursalActivaId } = useSucursal()
 
   // Panes en carrito
@@ -1092,17 +1092,30 @@ export default function Ventas() {
           </div>
         ))}
         <button 
-          onClick={()=>setReservaItems(r=>[...r,{producto_id:'',cantidad:0,precio_unitario:0}])} 
+          onClick={() => setReservaItems(r => [
+            ...r,
+            { producto_id: '', cantidad: 0, precio_unitario: 0 }
+          ])} 
           className="btn-secondary" 
-          style={{ width:'100%',marginBottom:14,fontSize:13 }}
+          style={{ width:'100%', marginBottom:14, fontSize:13 }}
         >
           + Ítem
         </button>
-        {totalReserva > 0 && (
-          <div style={{ background:'var(--yellow-soft)', borderRadius:10, padding:'10px 14px', display:'flex', justifyContent:'space-between', fontWeight:700, marginBottom:14 }}>
-            <span>Total</span><span>Bs {totalReserva.toFixed(2)}</span>
-          </div>
-        )}
+
+        <div 
+          style={{
+            background:'var(--yellow-soft)',
+            borderRadius:10,
+            padding:'10px 14px',
+            display:'flex',
+            justifyContent:'space-between',
+            fontWeight:700,
+            marginBottom:14
+          }}
+        >
+          <span>Total</span>
+          <span>Bs {totalReserva.toFixed(2)}</span>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
           {MEDIOS.map(m=>(
             <button 
