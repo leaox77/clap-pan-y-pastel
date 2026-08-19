@@ -55,8 +55,12 @@ export default function Ventas() {
   // Panes en carrito
   const panesEnCarrito = carrito.filter(item => item.es_pan_generico === true)
   const totalPanesEnCarrito = panesEnCarrito.reduce((s, i) => s + i.cantidad, 0)
-  const totalPanesAPagar = totalPanesEnCarrito * PRECIO_PAN_GENERICO
-  const cambioPanCobro = recibidoPanCobro - totalPanesAPagar
+  const totalPanesAPagar = Number(
+    (totalPanesEnCarrito * PRECIO_PAN_GENERICO).toFixed(2)
+  )
+  const cambioPanCobro = Number(
+    (recibidoPanCobro - totalPanesAPagar).toFixed(2)
+  )
 
   const prodsFiltrados = useMemo(() =>
     productos.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
