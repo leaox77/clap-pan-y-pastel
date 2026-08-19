@@ -23,28 +23,28 @@ function getBoliviaDateString() {
   return boliviaDate.toISOString().split('T')[0]
 }
 
-// Obtener el timestamp de Bolivia en formato ISO
-// Obtener timestamp de Bolivia en formato para PostgreSQL
 // Función que obtiene la hora actual de Bolivia como string para PostgreSQL
+// Bolivia es UTC-4 fijo (no tiene horario de verano), así que no dependemos
+// de la timezone del navegador ni de getTimezoneOffset(): tomamos el epoch
+// real (que siempre es correcto sin importar el navegador) y restamos 4h.
 function getBoliviaTimestampForDB() {
-  // Crear fecha en Bolivia usando la zona horaria del navegador
-  const now = new Date()
-  // Obtener el offset actual del navegador y ajustar a UTC-4
-  const offset = now.getTimezoneOffset() // en minutos
-  const boliviaOffset = -240 // UTC-4 en minutos
-  const diffMinutes = boliviaOffset - offset
-  const boliviaTime = new Date(now.getTime() + diffMinutes * 60000)
-  
-  // Formatear para PostgreSQL
-  return boliviaTime.toISOString().replace('T', ' ').slice(0, 19)
+  const now = new Date() // epoch real, siempre correcto
+  const boliviaTime = new Date(now.getTime() - 4 * 3600000)
+  const iso = boliviaTime.toISOString().replace('T', ' ').slice(0, 19)
+  // Offset explícito: sin esto, Postgres asume la timezone de la sesión (UTC)
+  // y desfasa el dato 4 horas.
+  return iso + '-04'
 }
 
 function formatBoliviaTime(timestamp) {
   if (!timestamp) return '--:--'
   const date = new Date(timestamp)
-  const hours = String(date.getUTCHours()).padStart(2, '0')
-  const minutes = String(date.getUTCMinutes()).padStart(2, '0')
-  return `${hours}:${minutes}`
+  return date.toLocaleTimeString('es-BO', {
+    timeZone: 'America/La_Paz',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
 }
 
 // ============================================================
@@ -319,28 +319,9 @@ export default function Caja() {
         return
       }
 
-      // 4. NO HAY CAJA ABIERTA - Usar fechas de Bolivia
-      const hoyStr = getBoliviaDateString()
-      
-      // Calcular ayer en Bolivia
-      const ayerDate = getBoliviaDate()
-      ayerDate.setDate(ayerDate.getDate() - 1)
-      const ayerStr = ayerDate.toISOString().split('T')[0]
+            // 4. NO HAY CAJA ABIERTA
 
-      // Sobrantes pendientes
-      const { data: sob, error: sobError } = await supabase
-        .from('sobrantes_dia')
-        .select('*')
-        .eq('confirmado', false)
-        .eq('sucursal_id', sucursalActivaId)
-        .gte('fecha', ayerStr)
-        .order('created_at', { ascending: false })
-
-      if (sobError) {
-        console.error('Error cargando sobrantes:', sobError)
-      }
-
-      // Última sesión cerrada
+      // Última sesión cerrada de esta sucursal
       const { data: ultima, error: ultimaError } = await supabase
         .from('caja_sesiones')
         .select('*')
@@ -354,7 +335,25 @@ export default function Caja() {
         console.error('Error cargando última sesión:', ultimaError)
       }
 
-      const sobConCantidad = (sob ?? []).map(s => ({
+      // Sobrantes pendientes: SOLO los que salieron de la última sesión cerrada.
+      // Se usa caja_sesion_origen_id, no un rango de fechas de la sucursal.
+      let sob = []
+      if (ultima) {
+        const { data: sobData, error: sobError } = await supabase
+          .from('sobrantes_dia')
+          .select('*')
+          .eq('confirmado', false)
+          .eq('caja_sesion_origen_id', ultima.id)
+          .order('created_at', { ascending: false })
+
+        if (sobError) {
+          console.error('Error cargando sobrantes:', sobError)
+        } else {
+          sob = sobData ?? []
+        }
+      }
+
+      const sobConCantidad = sob.map(s => ({
         ...s,
         cantidad_recibida: s.cantidad_registrada,
       }))
@@ -368,40 +367,18 @@ export default function Caja() {
         }))
       )
 
-      // DETERMINAR TURNO AUTOMÁTICAMENTE usando fechas de Bolivia
+      // DETERMINAR TURNO: es una regla fija sobre el turno anterior,
+      // nunca una comparación de fechas.
       if (ultima) {
         setSesionAnterior(ultima)
 
         const panSobrante = Number(ultima.pan_sobrante_cierre ?? 0)
         setPanSobrAnterior(panSobrante)
 
-        // Convertir fecha de cierre a Bolivia para comparar
-        const fechaCierre = ultima.fecha_cierre 
-          ? new Date(ultima.fecha_cierre).toISOString().split('T')[0] 
-          : null
+        const siguienteTurno = ultima.tipo_turno === 'manana' ? 'tarde' : 'manana'
 
-        if (ultima.tipo_turno === 'manana') {
-          if (fechaCierre === hoyStr) {
-            // Turno mañana cerrado hoy → solo se puede abrir tarde
-            setTipoTurno('tarde')
-            setTurnoBloqueado(false)
-          } else {
-            // Turno mañana cerrado en día anterior → se puede abrir mañana
-            setTipoTurno('manana')
-            setTurnoBloqueado(false)
-          }
-        } else if (ultima.tipo_turno === 'tarde') {
-          //if (fechaCierre === hoyStr) {
-            // Turno tarde cerrado hoy → se puede abrir mañana
-            setTipoTurno('manana')
-            setTurnoBloqueado(false)
-          /*} else {
-            // Turno tarde cerrado en día anterior → hay problema
-            setTipoTurno('manana')
-            setTurnoBloqueado(true)
-            toast('El turno tarde del día anterior no fue cerrado. Revisa la caja.', 'warn')
-          }*/
-        }
+        setTipoTurno(siguienteTurno)
+        setTurnoBloqueado(false)
       } else {
         // No hay sesión anterior → comenzar con mañana
         setSesionAnterior(null)
