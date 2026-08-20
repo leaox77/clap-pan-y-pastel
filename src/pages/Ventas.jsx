@@ -590,7 +590,28 @@ export default function Ventas() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24, marginBottom: 16 }}>
                   <button 
                     onClick={() => {
-                      if (cantPan > 0) setCantPan(c => c - 1)
+                      if (cantPan > 0) {
+                        // En lugar de solo bajar cantPan, también eliminamos/quitamos un pan del carrito
+                        const panEnCarrito = carrito.find(item => item.es_pan_generico === true)
+                        if (panEnCarrito) {
+                          if (panEnCarrito.cantidad === 1) {
+                            // Si solo hay 1, eliminar el item
+                            setCarrito(carrito.filter(item => !item.es_pan_generico))
+                          } else {
+                            // Reducir cantidad en 1
+                            setCarrito(carrito.map(item =>
+                              item.es_pan_generico === true
+                                ? { 
+                                    ...item, 
+                                    cantidad: item.cantidad - 1,
+                                    subtotal: (item.cantidad - 1) * PRECIO_PAN_GENERICO
+                                  }
+                                : item
+                            ))
+                          }
+                        }
+                        setCantPan(c => c - 1)
+                      }
                     }} 
                     style={{ width: 60, height: 60, borderRadius: 16, border: '2px solid var(--silver-light)', background: 'none', fontSize: 30, cursor: 'pointer', fontWeight: 700 }}
                   >
