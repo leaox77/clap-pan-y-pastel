@@ -8,7 +8,15 @@ export function SucursalProvider({ children }) {
   const { role, sucursalId, loading: authLoading } = useAuth()
 
   const [sucursales, setSucursales] = useState([])
-  const [sucursalActivaId, setSucursalActivaId] = useState(null)
+
+  const [sucursalActivaId, setSucursalActivaId] = useState(() => {
+    try {
+      return localStorage.getItem('sucursal_activa_id') || null
+    } catch {
+      return null
+    }
+  })
+
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -69,15 +77,40 @@ export function SucursalProvider({ children }) {
       setSucursales(lista)
 
       /*
-       * Si la sucursal activa actual ya no existe
-       * o quedó inactiva, seleccionar la primera.
+       * Buscar sucursal válida:
+       *
+       * 1. La que ya está en el estado
+       * 2. La guardada en localStorage
+       * 3. La primera disponible
        */
       setSucursalActivaId(actual => {
         if (actual && lista.some(s => s.id === actual)) {
           return actual
         }
 
-        return lista[0]?.id ?? null
+        let guardada = null
+
+        try {
+          guardada = localStorage.getItem('sucursal_activa_id')
+        } catch {
+          guardada = null
+        }
+
+        if (guardada && lista.some(s => s.id === guardada)) {
+          return guardada
+        }
+
+        const primera = lista[0]?.id ?? null
+
+        if (primera) {
+          try {
+            localStorage.setItem('sucursal_activa_id', primera)
+          } catch (error) {
+            console.error('No se pudo guardar la sucursal:', error)
+          }
+        }
+
+        return primera
       })
 
       setLoading(false)
@@ -106,6 +139,12 @@ export function SucursalProvider({ children }) {
     if (!existe) {
       console.warn('Sucursal no válida:', id)
       return
+    }
+
+    try {
+      localStorage.setItem('sucursal_activa_id', id)
+    } catch (error) {
+      console.error('No se pudo guardar la sucursal:', error)
     }
 
     setSucursalActivaId(id)

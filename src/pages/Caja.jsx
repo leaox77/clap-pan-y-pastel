@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
@@ -45,6 +45,39 @@ function formatBoliviaTime(timestamp) {
     minute: '2-digit',
     hour12: false
   })
+}
+
+// ============================================================
+// PERSISTENCIA DE FORMULARIOS DE CAJA
+// ============================================================
+
+const STORAGE_APERTURA = 'caja_formulario_apertura'
+const STORAGE_CIERRE = 'caja_formulario_cierre'
+
+function guardarFormularioCaja(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify(data))
+  } catch (error) {
+    console.error('Error guardando formulario de caja:', error)
+  }
+}
+
+function cargarFormularioCaja(key) {
+  try {
+    const data = localStorage.getItem(key)
+    return data ? JSON.parse(data) : null
+  } catch (error) {
+    console.error('Error cargando formulario de caja:', error)
+    return null
+  }
+}
+
+function borrarFormularioCaja(key) {
+  try {
+    localStorage.removeItem(key)
+  } catch (error) {
+    console.error('Error borrando formulario de caja:', error)
+  }
 }
 
 // ============================================================
@@ -138,6 +171,74 @@ export default function Caja() {
   const [sobraantesConfirmados, setSobraantesConfirmados] = useState([])
   const [productosPan, setProductosPan] = useState([])
 
+  // local storage
+  const [formulariosCargados, setFormulariosCargados] = useState(false)
+
+  // ============================================================
+// RESTAURAR FORMULARIOS DE CAJA DESDE LOCALSTORAGE
+// ============================================================
+
+useEffect(() => {
+  if (!sucursalActivaId) {
+    setFormulariosCargados(false)
+    return
+  }
+
+  setFormulariosCargados(false)
+
+  try {
+    // --------------------------------------------------------
+    // APERTURA
+    // --------------------------------------------------------
+
+    const apertura = cargarFormularioCaja(
+      `${STORAGE_APERTURA}_${sucursalActivaId}`
+    )
+
+    if (apertura) {
+      setDenom(apertura.denom ?? {})
+      setCajasPan(apertura.cajasPan ?? [])
+      setNumCajas(apertura.numCajas ?? '')
+      setSobraantesConfirmados(
+        apertura.sobraantesConfirmados ?? []
+      )
+
+      if (apertura.tipoTurno) {
+        setTipoTurno(apertura.tipoTurno)
+      }
+    }
+
+    // --------------------------------------------------------
+    // CIERRE
+    // --------------------------------------------------------
+
+    const cierre = cargarFormularioCaja(
+      `${STORAGE_CIERRE}_${sucursalActivaId}`
+    )
+
+    if (cierre) {
+      setDenomCierre(cierre.denomCierre ?? {})
+      setPanSobrCierre(cierre.panSobrCierre ?? '')
+      setPerdidasMonto(cierre.perdidasMonto ?? '')
+      setPerdidasNota(cierre.perdidasNota ?? '')
+      setSobraantesCierre(
+        cierre.sobraantesCierre ?? []
+      )
+    }
+
+  } catch (error) {
+    console.error(
+      'Error restaurando formularios de caja:',
+      error
+    )
+  }
+
+  // MUY IMPORTANTE:
+  // desde este momento ya podemos empezar a guardar cambios
+  setFormulariosCargados(true)
+
+}, [sucursalActivaId])
+
   // Cierre
   const [denomCierre, setDenomCierre] = useState({})
   const [panSobrCierre, setPanSobrCierre] = useState('')
@@ -154,22 +255,134 @@ export default function Caja() {
   const [denomAjuste, setDenomAjuste] = useState({})
   const [motivoAjuste, setMotivoAjuste] = useState('')
 
-  useEffect(() => {
-    if (!sucursalActivaId) {
-      setSesion(null)
-      setSesionAnterior(null)
-      setMovimientos([])
-      setGastos([])
-      setProductos([])
-      setProductosPan([])
-      setSobraantesPendientes([])
-      setSobraantesConfirmados([])
-      setVentasTurno([])
-      setLoading(false)
-      return
+  // ============================================================
+// RESTAURAR FORMULARIOS DE CAJA DESDE LOCALSTORAGE
+// ============================================================
+
+useEffect(() => {
+  if (!sucursalActivaId) {
+    setFormulariosCargados(false)
+    return
+  }
+
+  setFormulariosCargados(false)
+
+  try {
+    // --------------------------------------------------------
+    // APERTURA
+    // --------------------------------------------------------
+
+    const apertura = cargarFormularioCaja(
+      `${STORAGE_APERTURA}_${sucursalActivaId}`
+    )
+
+    if (apertura) {
+      setDenom(apertura.denom ?? {})
+      setCajasPan(apertura.cajasPan ?? [])
+      setNumCajas(apertura.numCajas ?? '')
+      setSobraantesConfirmados(
+        apertura.sobraantesConfirmados ?? []
+      )
+
+      if (apertura.tipoTurno) {
+        setTipoTurno(apertura.tipoTurno)
+      }
     }
 
-    setStep('idle')
+    // --------------------------------------------------------
+    // CIERRE
+    // --------------------------------------------------------
+
+    const cierre = cargarFormularioCaja(
+      `${STORAGE_CIERRE}_${sucursalActivaId}`
+    )
+
+    if (cierre) {
+      setDenomCierre(cierre.denomCierre ?? {})
+      setPanSobrCierre(cierre.panSobrCierre ?? '')
+      setPerdidasMonto(cierre.perdidasMonto ?? '')
+      setPerdidasNota(cierre.perdidasNota ?? '')
+      setSobraantesCierre(
+        cierre.sobraantesCierre ?? []
+      )
+    }
+
+  } catch (error) {
+    console.error(
+      'Error restaurando formularios de caja:',
+      error
+    )
+  }
+
+  // MUY IMPORTANTE:
+  // desde este momento ya podemos empezar a guardar cambios
+  setFormulariosCargados(true)
+
+}, [sucursalActivaId])
+
+  //localstorage
+// ============================================================
+// GUARDAR FORMULARIO DE APERTURA
+// ============================================================
+//apertura
+useEffect(() => {
+  if (!sucursalActivaId || !formulariosCargados) {
+    return
+  }
+
+  guardarFormularioCaja(
+    `${STORAGE_APERTURA}_${sucursalActivaId}`,
+    {
+      denom,
+      cajasPan,
+      numCajas,
+      sobraantesConfirmados,
+      tipoTurno,
+    }
+  )
+}, [
+  sucursalActivaId,
+  formulariosCargados,
+  denom,
+  cajasPan,
+  numCajas,
+  sobraantesConfirmados,
+  tipoTurno,
+])
+
+//cierre
+
+// ============================================================
+// GUARDAR FORMULARIO DE CIERRE
+// ============================================================
+
+useEffect(() => {
+  if (!sucursalActivaId || !formulariosCargados) {
+    return
+  }
+
+  guardarFormularioCaja(
+    `${STORAGE_CIERRE}_${sucursalActivaId}`,
+    {
+      denomCierre,
+      panSobrCierre,
+      perdidasMonto,
+      perdidasNota,
+      sobraantesCierre,
+    }
+  )
+}, [
+  sucursalActivaId,
+  formulariosCargados,
+  denomCierre,
+  panSobrCierre,
+  perdidasMonto,
+  perdidasNota,
+  sobraantesCierre,
+])
+
+  useEffect(() => {
+  if (!sucursalActivaId) {
     setSesion(null)
     setSesionAnterior(null)
     setMovimientos([])
@@ -178,15 +391,23 @@ export default function Caja() {
     setProductosPan([])
     setSobraantesPendientes([])
     setSobraantesConfirmados([])
-    setDenom({})
-    setDenomCierre({})
-    setDenomAjuste({})
-    setTurnoBloqueado(false)
-    setCajasPan([])
-    setNumCajas('')
+    setVentasTurno([])
+    setLoading(false)
+    return
+  }
 
-    fetchData()
-  }, [sucursalActivaId])
+  setStep('idle')
+  setSesion(null)
+  setSesionAnterior(null)
+  setMovimientos([])
+  setGastos([])
+  setProductos([])
+  setProductosPan([])
+  setSobraantesPendientes([])
+  setTurnoBloqueado(false)
+
+  fetchData()
+}, [sucursalActivaId])
 
   async function fetchData() {
     if (!sucursalActivaId) return
@@ -514,6 +735,11 @@ export default function Caja() {
         return
     }
 
+    // La apertura fue exitosa → ahora sí borramos el formulario guardado
+    borrarFormularioCaja(
+        `${STORAGE_APERTURA}_${sucursalActivaId}`
+    )
+
     toast(`Turno ${tipoTurno === 'manana' ? '☀️ mañana' : '🌙 tarde'} iniciado — ${totalPanes} panes`, 'ok')
 
     setStep('idle')
@@ -557,10 +783,15 @@ export default function Caja() {
     })
 
     if (error) {
-      console.error('Error cerrando caja:', error)
-      toast(error.message, 'err')
-      return
+        console.error('Error cerrando caja:', error)
+        toast(error.message, 'err')
+        return
     }
+
+    // El cierre fue exitoso → borrar el formulario guardado
+    borrarFormularioCaja(
+        `${STORAGE_CIERRE}_${sucursalActivaId}`
+    )
 
     toast(`Turno ${sesion.tipo_turno === 'manana' ? '☀️ mañana' : '🌙 tarde'} cerrado correctamente`, 'ok')
 
