@@ -218,6 +218,7 @@ useEffect(() => {
 
     if (cierre) {
       setDenomCierre(cierre.denomCierre ?? {})
+      setPanFisicoCierre(cierre.panFisicoCierre ?? '')
       setPanSobrCierre(cierre.panSobrCierre ?? '')
       setPerdidasMonto(cierre.perdidasMonto ?? '')
       setPerdidasNota(cierre.perdidasNota ?? '')
@@ -245,6 +246,8 @@ useEffect(() => {
   const [perdidasMonto, setPerdidasMonto] = useState('')
   const [perdidasNota, setPerdidasNota] = useState('')
   const [sobraantesCierre, setSobraantesCierre] = useState([])
+  const [inventarioCierre, setInventarioCierre] = useState([])
+  const [panFisicoCierre, setPanFisicoCierre] = useState('')
   const [ventasTurno, setVentasTurno] = useState([])
 
   // Ingreso extra
@@ -369,6 +372,7 @@ useEffect(() => {
       perdidasMonto,
       perdidasNota,
       sobraantesCierre,
+      panFisicoCierre,
     }
   )
 }, [
@@ -379,6 +383,7 @@ useEffect(() => {
   perdidasMonto,
   perdidasNota,
   sobraantesCierre,
+  panFisicoCierre,
 ])
 
   useEffect(() => {
@@ -446,8 +451,18 @@ useEffect(() => {
 
       const productosNormalizados = (prods ?? [])
         .map(item => ({
-          ...item,
+          // Datos del producto
           ...(item.productos ?? {}),
+
+          // Datos del inventario de ESTA sucursal
+          ...item,
+
+          // Nos aseguramos de usar explícitamente el ID del producto
+          id: item.producto_id,
+
+          // El stock viene de inventario_sucursal
+          stock_actual: Number(item.stock_actual ?? 0),
+
           categoria: item.productos?.categorias ?? null,
         }))
         .filter(p => p.activo !== false)
@@ -651,6 +666,64 @@ useEffect(() => {
   // Calcular total de panes
   const totalPanes = cajasPan.reduce((sum, c) => sum + (Number(c.cantidad) || 0), 0) + Number(panSobrAnterior || 0)
 
+  // ============================================================
+  // PREPARAR INVENTARIO PARA EL CONTEO DE CIERRE
+  // ============================================================
+
+  function prepararInventarioCierre() {
+    const inventario = productos
+      .filter(p => p.activo !== false && !p.es_pan)
+      .map(p => ({
+        producto_id: p.id,
+        nombre: p.nombre,
+        es_pan: false,
+        stock_sistema: Number(p.stock_actual ?? 0),
+        cantidad_fisica: '',
+      }))
+      .sort((a, b) =>
+        String(a.nombre).localeCompare(
+          String(b.nombre),
+          'es'
+        )
+      )
+
+    setInventarioCierre(inventario)
+
+    // El pan se cuenta como un único total
+    setPanFisicoCierre('')
+  }
+
+  function totalPanSistema() {
+    return productos
+      .filter(p => p.activo !== false && p.es_pan)
+      .reduce(
+        (sum, p) => sum + Number(p.stock_actual ?? 0),
+        0
+      )
+  }
+
+  function diferenciaPanCierre() {
+    if (panFisicoCierre === '') return null
+
+    return (
+      Number(panFisicoCierre) -
+      totalPanSistema()
+    )
+  }
+
+  function actualizarConteoFisico(productoId, cantidad) {
+    setInventarioCierre(prev =>
+      prev.map(item =>
+        item.producto_id === productoId
+          ? {
+              ...item,
+              cantidad_fisica: cantidad
+            }
+          : item
+      )
+    )
+  }
+  
   async function abrirCaja() {
     if (!sucursalActivaId) {
         toast('No hay una sucursal seleccionada', 'err')
@@ -762,7 +835,23 @@ useEffect(() => {
 
     const montoFisico = totalDenoms(denomCierre)
 
-    const sobFiltrados = sobraantesCierre.filter(s => s.producto_id && Number(s.cantidad) > 0)
+    // ============================================================
+    // GENERAR SOBRANTES A PARTIR DEL CONTEO FÍSICO
+    // ============================================================
+
+    const sobFiltrados = inventarioCierre
+      .filter(item => {
+        if (item.cantidad_fisica === '') return false
+
+        const cantidad = Number(item.cantidad_fisica)
+
+        return cantidad > 0
+      })
+      .map(item => ({
+        producto_id: item.producto_id,
+        producto_nombre: item.nombre,
+        cantidad: Number(item.cantidad_fisica)
+      }))
 
     // 🔥 CORRECCIÓN: Obtener timestamp de Bolivia para el cierre
     const timestampBolivia = getBoliviaTimestampForDB() 
@@ -801,6 +890,8 @@ useEffect(() => {
     setPerdidasMonto('')
     setPerdidasNota('')
     setSobraantesCierre([])
+    setInventarioCierre([])
+    setPanFisicoCierre('')
 
     await fetchData()
   }
@@ -915,7 +1006,13 @@ useEffect(() => {
             <button className="btn-secondary" onClick={() => setModalIngresoExtra(true)} style={{ fontSize: 13 }}>
               ＋ Ingreso adicional
             </button>
-            <button className="btn-danger" onClick={() => setStep('cierre')}>
+            <button
+              className="btn-danger"
+              onClick={() => {
+                prepararInventarioCierre()
+                setStep('cierre')
+              }}
+            >
               Cerrar turno
             </button>
           </>
@@ -1426,82 +1523,408 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* PAN SOBRANTE */}
-        <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-          <label className="form-label">🍞 Panes sobrantes al cerrar (total)</label>
-          <input
-            className="form-input"
-            type="number"
-            value={panSobrCierre}
-            onChange={e => setPanSobrCierre(e.target.value)}
-            placeholder="0"
-            style={{ textAlign: 'center', fontWeight: 800, fontSize: 22, marginBottom: 10 }}
-          />
-          <p style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 6 }}>
-            {sesion?.tipo_turno === 'tarde' ? 'Estos panes pasarán al turno mañana del próximo día' : 'Estos panes pasarán al turno tarde de hoy'}
-          </p>
-        </div>
+        {/* ======================================================
+            CONTROL DE INVENTARIO AL CIERRE
+        ====================================================== */}
+        <div
+          className="card"
+          style={{
+            padding: 12,
+            marginBottom: 12
+          }}
+        >
+          <div style={{ marginBottom: 12 }}>
+            <p
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                marginBottom: 4
+              }}
+            >
+              📦 Control de inventario al cierre
+            </p>
 
-        {/* SOBRANTES OTROS PRODUCTOS */}
-        <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-          <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📦 ¿Sobran otros productos? (opcional)</p>
-          {sobraantesCierre.map((s, idx) => (
-            <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-              <select
-                className="form-input form-select"
-                style={{ flex: 2 }}
-                value={s.producto_id ?? ''}
-                onChange={e =>
-                  setSobraantesCierre(arr =>
-                    arr.map((x, i) =>
-                      i === idx ? { ...x, producto_id: e.target.value } : x
-                    )
-                  )
-                }
-              >
-                <option value="">Seleccionar...</option>
-                {productos.filter(p => !p.es_pan).map(p => (
-                  <option key={p.id} value={p.id}>{p.nombre}</option>
-                ))}
-              </select>
-              <input
-                className="form-input"
-                type="number"
-                style={{ width: 70 }}
-                placeholder="Cant."
-                value={s.cantidad ?? ''}
-                onChange={e =>
-                  setSobraantesCierre(arr =>
-                    arr.map((x, i) =>
-                      i === idx ? { ...x, cantidad: e.target.value } : x
-                    )
-                  )
-                }
-              />
-              <button
-                className="btn-secondary"
-                onClick={() =>
-                  setSobraantesCierre(arr => arr.filter((_, i) => i !== idx))
-                }
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          <button
-            className="btn-secondary"
-            style={{ width: '100%', marginTop: 4 }}
-            onClick={() =>
-              setSobraantesCierre(arr => [...arr, { producto_id: '', cantidad: '' }])
-            }
+            <p
+              style={{
+                fontSize: 11,
+                color: 'var(--text-soft)'
+              }}
+            >
+              Cuenta físicamente los productos. El sistema
+              comparará el stock registrado con la cantidad real.
+            </p>
+          </div>
+
+          {/* ====================================================
+              PAN - TOTAL GENERAL
+          ==================================================== */}
+          <div
+            style={{
+              border: '1px solid var(--silver-light)',
+              borderRadius: 9,
+              padding: 10,
+              marginBottom: 10,
+              background:
+                panFisicoCierre === ''
+                  ? 'var(--bg-soft)'
+                  : diferenciaPanCierre() === 0
+                    ? 'var(--ok-bg)'
+                    : diferenciaPanCierre() < 0
+                      ? 'var(--err-bg)'
+                      : 'var(--warn-bg)'
+            }}
           >
-            + Agregar producto
-          </button>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                flexWrap: 'wrap'
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <p
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    marginBottom: 2
+                  }}
+                >
+                  🍞 Pan
+                </p>
+
+                <p
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--text-soft)'
+                  }}
+                >
+                  Total registrado: {totalPanSistema()}
+                </p>
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--text-soft)'
+                  }}
+                >
+                  Físico:
+                </span>
+
+                <input
+                  className="form-input"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={panFisicoCierre}
+                  onChange={e =>
+                    setPanFisicoCierre(e.target.value)
+                  }
+                  placeholder="0"
+                  style={{
+                    width: 75,
+                    textAlign: 'center',
+                    fontWeight: 700
+                  }}
+                />
+              </div>
+
+              {panFisicoCierre !== '' && (
+                <div
+                  style={{
+                    minWidth: 90,
+                    textAlign: 'right'
+                  }}
+                >
+                  {diferenciaPanCierre() === 0 && (
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        color: 'var(--ok)'
+                      }}
+                    >
+                      ✓ Coincide
+                    </span>
+                  )}
+
+                  {diferenciaPanCierre() < 0 && (
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        color: 'var(--err)'
+                      }}
+                    >
+                      ⚠ Faltan {Math.abs(diferenciaPanCierre())}
+                    </span>
+                  )}
+
+                  {diferenciaPanCierre() > 0 && (
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        color: 'var(--warn)'
+                      }}
+                    >
+                      +{diferenciaPanCierre()} extra
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ====================================================
+              OTROS PRODUCTOS
+          ==================================================== */}
+          {inventarioCierre.map(producto => {
+            const tieneConteo =
+              producto.cantidad_fisica !== ''
+
+            const cantidadFisica = Number(
+              producto.cantidad_fisica || 0
+            )
+
+            const diferencia =
+              tieneConteo
+                ? cantidadFisica - producto.stock_sistema
+                : 0
+
+            const coincide =
+              tieneConteo && diferencia === 0
+
+            const esFaltante =
+              tieneConteo && diferencia < 0
+
+            const esExcedente =
+              tieneConteo && diferencia > 0
+
+            return (
+              <div
+                key={producto.producto_id}
+                style={{
+                  border: '1px solid var(--silver-light)',
+                  borderRadius: 9,
+                  padding: '9px 10px',
+                  marginBottom: 8,
+                  background:
+                    coincide
+                      ? 'var(--ok-bg)'
+                      : esFaltante
+                        ? 'var(--err-bg)'
+                        : esExcedente
+                          ? 'var(--warn-bg)'
+                          : 'var(--bg-soft)'
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    flexWrap: 'wrap'
+                  }}
+                >
+                  <div
+                    style={{
+                      flex: 1,
+                      minWidth: 150
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        marginBottom: 2
+                      }}
+                    >
+                      {producto.nombre}
+                    </p>
+
+                    <p
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--text-soft)'
+                      }}
+                    >
+                      Stock registrado: {producto.stock_sistema}
+                    </p>
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--text-soft)'
+                      }}
+                    >
+                      Físico:
+                    </span>
+
+                    <input
+                      className="form-input"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={producto.cantidad_fisica}
+                      onChange={e =>
+                        actualizarConteoFisico(
+                          producto.producto_id,
+                          e.target.value
+                        )
+                      }
+                      placeholder="0"
+                      style={{
+                        width: 75,
+                        textAlign: 'center',
+                        fontWeight: 700
+                      }}
+                    />
+                  </div>
+
+                  {tieneConteo && (
+                    <div
+                      style={{
+                        minWidth: 90,
+                        textAlign: 'right'
+                      }}
+                    >
+                      {coincide && (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: 'var(--ok)'
+                          }}
+                        >
+                          ✓ Coincide
+                        </span>
+                      )}
+
+                      {esFaltante && (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: 'var(--err)'
+                          }}
+                        >
+                          ⚠ Faltan {Math.abs(diferencia)}
+                        </span>
+                      )}
+
+                      {esExcedente && (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: 'var(--warn)'
+                          }}
+                        >
+                          +{diferencia} extra
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+
+          {/* ====================================================
+              RESUMEN
+          ==================================================== */}
+          <div
+            style={{
+              marginTop: 12,
+              padding: 10,
+              borderRadius: 9,
+              background: 'var(--bg-soft)',
+              fontSize: 11
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginBottom: 4
+              }}
+            >
+              <span>Productos a revisar</span>
+              <strong>{inventarioCierre.length}</strong>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between'
+              }}
+            >
+              <span>Pan total a revisar</span>
+              <strong>{totalPanSistema()}</strong>
+            </div>
+          </div>
+
+          {/* AVISO DE FALTANTES */}
+          {(
+            diferenciaPanCierre() !== null &&
+            diferenciaPanCierre() < 0
+          ) ||
+          inventarioCierre.some(
+            p =>
+              p.cantidad_fisica !== '' &&
+              Number(p.cantidad_fisica) < p.stock_sistema
+          ) ? (
+            <div
+              style={{
+                background: 'var(--warn-bg)',
+                color: 'var(--warn)',
+                borderRadius: 8,
+                padding: '9px 11px',
+                marginTop: 10,
+                fontSize: 11
+              }}
+            >
+              ⚠ Hay productos con menos unidades de las
+              registradas. Puedes explicar estas diferencias
+              en <strong>Pérdidas / diferencias de inventario</strong>.
+            </div>
+          ) : null}
         </div>
 
-        {/* PÉRDIDAS */}
+        {/* PÉRDIDAS / DIFERENCIAS DE INVENTARIO */}
         <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-          <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>⚠ Pérdidas / faltantes</p>
+          <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+            ⚠ Pérdidas / diferencias de inventario
+          </p>
+
+          <p
+            style={{
+              fontSize: 11,
+              color: 'var(--text-soft)',
+              marginBottom: 10
+            }}
+          >
+            Registra aquí el monto de pérdidas y explica cualquier
+            faltante o diferencia detectada durante el conteo físico.
+          </p>
+
           <input
             className="form-input"
             type="number"
@@ -1510,11 +1933,12 @@ useEffect(() => {
             placeholder="Monto de pérdida"
             style={{ marginBottom: 8 }}
           />
+
           <input
             className="form-input"
             value={perdidasNota}
             onChange={e => setPerdidasNota(e.target.value)}
-            placeholder="Descripción (si hubo pérdidas, justifica aquí)"
+            placeholder="Ej.: Faltaron 2 empanadas por deterioro"
           />
         </div>
 
@@ -1549,7 +1973,7 @@ useEffect(() => {
           <button
             className="btn-primary"
             style={{ flex: 1 }}
-            disabled={totalDenoms(denomCierre) <= 0}
+            disabled={!sucursalActivaId}
             onClick={cerrarCaja}
           >
             Confirmar cierre
