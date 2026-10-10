@@ -26,9 +26,8 @@ export default function Reservas() {
     const [procesando, setProcesando] = useState(false)
     // Función para obtener fecha de Bolivia
 function getBoliviaDateString() {
-  const now = new Date()
-  const boliviaTime = new Date(now.getTime() - (now.getTimezoneOffset() * 60000) - 4 * 3600000)
-  return boliviaTime.toISOString().split('T')[0]
+  // Bolivia es UTC-4 fijo: se resta al epoch real, sin depender del huso del navegador
+  return new Date(Date.now() - 4 * 3600000).toISOString().split('T')[0]
 }
 
 const [filtroFecha, setFiltroFecha] = useState(getBoliviaDateString())
@@ -57,7 +56,7 @@ const [filtroFecha, setFiltroFecha] = useState(getBoliviaDateString())
             console.log('📌 Estado:', tab)
             
             // 1. Obtener reservas con JOIN a sucursales y profiles
-            const { data: reservas, error: errorReservas } = await supabase
+            let consulta = supabase
                 .from('reservas')
                 .select(`
                     id,
@@ -80,9 +79,17 @@ const [filtroFecha, setFiltroFecha] = useState(getBoliviaDateString())
                 `)
                 .eq('estado', tab)
                 .eq('sucursal_id', sucursalActivaId)
-                .gte('created_at', `${filtroFecha}T00:00:00`)
-                .lte('created_at', `${filtroFecha}T23:59:59`)
                 .order('created_at', { ascending: false })
+
+            // Las pendientes se muestran todas (se pueden entregar días después);
+            // entregadas y canceladas se filtran por el día de Bolivia elegido.
+            if (tab !== 'pendiente') {
+                consulta = consulta
+                    .gte('created_at', `${filtroFecha}T00:00:00-04:00`)
+                    .lte('created_at', `${filtroFecha}T23:59:59-04:00`)
+            }
+
+            const { data: reservas, error: errorReservas } = await consulta
             
             if (errorReservas) {
                 console.error('❌ Error reservas:', errorReservas)
@@ -309,7 +316,7 @@ const [filtroFecha, setFiltroFecha] = useState(getBoliviaDateString())
                     </div>
                 ) : reservas.length === 0 ? (
                     <p style={{ padding: 32, textAlign: 'center', color: 'var(--text-soft)' }}>
-                        Sin reservas {tab}s en esta fecha
+                        {tab === 'pendiente' ? 'Sin reservas pendientes' : `Sin reservas ${tab}s en esta fecha`}
                     </p>
                 ) : (
                     <div>

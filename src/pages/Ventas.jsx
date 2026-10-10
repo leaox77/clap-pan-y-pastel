@@ -9,6 +9,13 @@ const BILLETES = [10, 20, 50, 100, 200]
 const RAPIDOS = [1, 2, 5, 10, 20, 50]
 const PRECIO_PAN_GENERICO = 0.80
 
+// Inicio del día actual en Bolivia (UTC-4) como timestamp con zona horaria.
+// Usar la fecha UTC del navegador cortaba el historial a las 20:00.
+function inicioDiaBolivia() {
+  const ahoraBolivia = new Date(Date.now() - 4 * 3600000)
+  return `${ahoraBolivia.toISOString().split('T')[0]}T00:00:00-04:00`
+}
+
 export default function Ventas() {
   const toast = useToast()
   const [tab, setTab] = useState('pan')
@@ -23,9 +30,6 @@ export default function Ventas() {
   const [carrito, setCarrito] = useState([])
   const [medioPago, setMedioPago] = useState('efectivo')
   const [recibido, setRecibido] = useState(0)
-
-  // PAN
-  const [cantPan, setCantPan] = useState(0)
 
   // Cobro rápido de panes
   const [medioPanCobro, setMedioPanCobro] = useState('efectivo')
@@ -73,7 +77,7 @@ export default function Ventas() {
   // ── FETCH INIT ──
   async function fetchInit() {
     if (!sucursalActivaId) return
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = inicioDiaBolivia()
     
     try {
       const [{ data: inv, error: invError }, { data: sesion }, { data: hist, error: histError }] = await Promise.all([
@@ -158,7 +162,7 @@ export default function Ventas() {
   // ── REFRESCAR HISTORIAL ──
   async function refrescarHistorial() {
     if (!sucursalActivaId) return
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = inicioDiaBolivia()
     
     try {
       const { data: hist, error } = await supabase
@@ -289,7 +293,7 @@ export default function Ventas() {
     
     if (item.es_pan_generico) {
       const panEnCarrito = carrito.filter(i => i.es_pan_generico === true)
-      const otroPan = panEnCarrito.filter((_, i) => i !== index)
+      const otroPan = panEnCarrito.filter(pan => pan !== item)
       const otroPanTotal = otroPan.reduce((s, i) => s + i.cantidad, 0)
       
       if (nuevaCantidad + otroPanTotal > totalPanStock) {
@@ -325,13 +329,11 @@ export default function Ventas() {
   function limpiarCarrito() {
     setCarrito([])
     setRecibido(0)
-    setCantPan(0)
   }
 
   // ── LIMPIAR SOLO PANES ──
   function limpiarSoloPanes() {
     setCarrito(carrito.filter(item => !item.es_pan_generico))
-    setCantPan(0)
     setRecibidoPanCobro(0)
     setMostrarCobroPan(false)
   }
@@ -380,7 +382,6 @@ export default function Ventas() {
     toast(`✓ ${totalPanes} panes Bs ${totalAPagar.toFixed(2)}${msg}`, 'ok')
     
     setCarrito(carrito.filter(item => !item.es_pan_generico))
-    setCantPan(0)
     setRecibidoPanCobro(0)
     setMostrarCobroPan(false)
     await fetchInit()
@@ -426,6 +427,24 @@ export default function Ventas() {
     limpiarCarrito()
     await fetchInit()
     await refrescarHistorial()
+  }
+
+  // ── ANULAR VENTA ──
+  async function anularVenta(venta) {
+    const detalle = `Bs ${Number(venta.total || 0).toFixed(2)} (${venta.medio_pago})`
+    if (!window.confirm(`¿Anular la venta de ${detalle}? Se devuelve el stock y se descuenta de la caja.`)) return
+
+    setProcesando(true)
+    const { error } = await supabase.rpc('anular_venta', { p_venta_id: venta.id })
+    setProcesando(false)
+
+    if (error) {
+      toast(error.message, 'err')
+      return
+    }
+
+    toast(`Venta anulada — Bs ${Number(venta.total || 0).toFixed(2)}`, 'ok')
+    await fetchInit()
   }
 
   // ── NUEVO PRODUCTO ──
@@ -475,41 +494,54 @@ export default function Ventas() {
 
   // ── RESERVA ──
   async function registrarReserva() {
-    if (!cajaSesionId || reservaItems.length === 0) {
+    const items = reservaItems.filter(i => i.producto_id && i.cantidad > 0)
+
+    if (!cajaSesionId || items.length === 0) {
       toast('Agrega items a la reserva', 'warn')
       return
     }
-    
+
+    if (!reservaDesc.trim()) {
+      toast('Escribe la descripción o el nombre del cliente', 'warn')
+      return
+    }
+
+    for (const item of items) {
+      const prod = todosProductos.find(p => p.id === item.producto_id)
+      if (!prod || item.cantidad > prod.stock_actual) {
+        toast(`Solo hay ${prod?.stock_actual ?? 0} unidades de ${prod?.nombre ?? 'un producto'}`, 'warn')
+        return
+      }
+    }
+
     setProcesando(true)
-    
+
     const { error } = await supabase.rpc('procesar_reserva', {
       p_caja_sesion_id: cajaSesionId,
-      p_descripcion: reservaDesc,
-      p_items: reservaItems
-        .filter(i => i.producto_id && i.cantidad > 0)
-        .map(i => ({ 
-          producto_id: i.producto_id, 
-          cantidad: Number(i.cantidad) 
-        })),
+      p_descripcion: reservaDesc.trim(),
+      p_items: items.map(i => ({
+        producto_id: i.producto_id,
+        cantidad: Number(i.cantidad),
+      })),
       p_medio_pago: reservaMedio,
-      p_total: totalReserva,
     })
-    
+
     setProcesando(false)
-    
-    if (error) { 
+
+    if (error) {
       toast(error.message, 'err')
-      return 
+      return
     }
-    
-    toast('Reserva registrada', 'ok')
+
+    toast('Reserva registrada — stock reservado', 'ok')
     setModalReserva(false)
     setReservaDesc('')
     setReservaItems([])
-    fetchInit()
+    await fetchInit()
   }
 
   const todosProductos = [...panes, ...productos]
+  const productosReservables = todosProductos.filter(p => p.stock_actual > 0)
 
   return (
     <div className="page-wrap">
@@ -556,7 +588,10 @@ export default function Ventas() {
           </button>
         ))}
         <button 
-          onClick={() => setModalReserva(true)} 
+          onClick={() => {
+            fetchInit()
+            setModalReserva(true)
+          }} 
           style={{ 
             marginLeft: 'auto', 
             padding: '7px 14px', 
@@ -585,13 +620,12 @@ export default function Ventas() {
             <>
               <div className="card" style={{ padding: 28, textAlign: 'center', marginBottom: 16 }}>
                 <p style={{ fontSize: 12, color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 12 }}>
-                  Pan — Bs {PRECIO_PAN_GENERICO.toFixed(2)} c/u
+                  Pan — Bs {PRECIO_PAN_GENERICO.toFixed(2)} c/u · Saldo: {totalPanStock}
                 </p>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24, marginBottom: 16 }}>
                   <button 
                     onClick={() => {
-                      if (cantPan > 0) {
-                        // En lugar de solo bajar cantPan, también eliminamos/quitamos un pan del carrito
+                      if (totalPanesEnCarrito > 0) {
                         const panEnCarrito = carrito.find(item => item.es_pan_generico === true)
                         if (panEnCarrito) {
                           if (panEnCarrito.cantidad === 1) {
@@ -610,7 +644,6 @@ export default function Ventas() {
                             ))
                           }
                         }
-                        setCantPan(c => c - 1)
                       }
                     }} 
                     style={{ width: 60, height: 60, borderRadius: 16, border: '2px solid var(--silver-light)', background: 'none', fontSize: 30, cursor: 'pointer', fontWeight: 700 }}
@@ -618,21 +651,18 @@ export default function Ventas() {
                     −
                   </button>
                   <span style={{ fontSize: 80, fontWeight: 900, minWidth: 120, textAlign: 'center', lineHeight: 1 }}>
-                    {cantPan}
+                    {totalPanesEnCarrito}
                   </span>
                   <button 
-                    onClick={() => {
-                      agregarPan(1)
-                      setCantPan(c => c + 1)
-                    }} 
+                    onClick={() => agregarPan(1)} 
                     style={{ width: 60, height: 60, borderRadius: 16, border: '2px solid var(--yellow)', background: 'var(--yellow-soft)', fontSize: 30, cursor: 'pointer', fontWeight: 700 }}
                   >
                     +
                   </button>
                 </div>
-                {cantPan > 0 && (
+                {totalPanesEnCarrito > 0 && (
                   <p style={{ fontSize: 22, fontWeight: 800, color: 'var(--ok)' }}>
-                    Bs {(cantPan * PRECIO_PAN_GENERICO).toFixed(2)}
+                    Bs {totalPanesAPagar.toFixed(2)}
                   </p>
                 )}
               </div>
@@ -642,10 +672,7 @@ export default function Ventas() {
                 {RAPIDOS.map(n => (
                   <button 
                     key={n} 
-                    onClick={() => {
-                      agregarPan(n)
-                      setCantPan(c => c + n)
-                    }}
+                    onClick={() => agregarPan(n)}
                     style={{ padding: '14px', borderRadius: 12, border: '1.5px solid var(--silver-light)', background: '#fff', fontSize: 17, fontWeight: 700, cursor: 'pointer' }}
                   >
                     +{n}
@@ -844,6 +871,9 @@ export default function Ventas() {
                 >
                   <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{p.nombre}</p>
                   <p style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-soft)' }}>Bs {Number(p.precio_venta).toFixed(2)}</p>
+                  <p style={{ fontSize: 11, color: p.stock_actual <= p.stock_minimo ? 'var(--err)' : 'var(--text-soft)', marginTop: 2 }}>
+                    Saldo: {p.stock_actual}
+                  </p>
                   {carrito.find(i=>i.producto_id === p.id) && (
                     <span className="badge-ok" style={{ fontSize: 10, marginTop: 4, display: 'inline-block' }}>
                       ×{carrito.find(i=>i.producto_id === p.id).cantidad}
@@ -993,12 +1023,13 @@ export default function Ventas() {
                   <th>Medio</th>
                   <th>Vendedor</th>
                   <th>Estado</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {historial.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-soft)', padding: 32 }}>
+                    <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-soft)', padding: 32 }}>
                       <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
                       Sin ventas registradas hoy
                     </td>
@@ -1030,6 +1061,18 @@ export default function Ventas() {
                         <span className={v.estado === 'anulada' ? 'badge-err' : 'badge-ok'}>
                           {v.estado === 'anulada' ? '❌ Anulada' : '✅ Completada'}
                         </span>
+                      </td>
+                      <td>
+                        {v.estado === 'completada' && (
+                          <button
+                            className="btn-secondary"
+                            style={{ fontSize: 12, padding: '4px 10px' }}
+                            disabled={procesando}
+                            onClick={() => anularVenta(v)}
+                          >
+                            Anular
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -1085,38 +1128,68 @@ export default function Ventas() {
           onChange={e=>setReservaDesc(e.target.value)} 
           placeholder="Ej: Reserva María — 10 panes" 
         />
-        <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Productos</p>
-        {reservaItems.map((item, idx) => (
-          <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-            <select 
-              className="form-input form-select" 
-              style={{ flex: 2 }} 
-              value={item.producto_id ?? ''} 
-              onChange={e => {
-                const prod = todosProductos.find(p=>p.id===e.target.value)
-                setReservaItems(r=>r.map((x,i)=>i===idx?{...x, producto_id:e.target.value, precio_unitario:prod?.precio_venta??0}:x))
-              }}
-            >
-              <option value="">Seleccionar...</option>
-              {todosProductos.map(p=><option key={p.id} value={p.id}>{p.nombre} — Bs {p.precio_venta}</option>)}
-            </select>
-            <input 
-              className="form-input" 
-              type="number" 
-              style={{ width: 70 }} 
-              placeholder="Cant." 
-              value={item.cantidad||''} 
-              onChange={e=>setReservaItems(r=>r.map((x,i)=>i===idx?{...x,cantidad:+e.target.value}:x))} 
-            />
-            <button 
-              onClick={()=>setReservaItems(r=>r.filter((_,i)=>i!==idx))} 
-              style={{ background:'none',border:'none',color:'var(--err)',cursor:'pointer',fontSize:18 }}
-            >
-              ×
-            </button>
-          </div>
-        ))}
+        <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Productos disponibles</p>
+        {productosReservables.length === 0 && (
+          <p style={{ fontSize: 12, color: 'var(--warn)', marginBottom: 10 }}>No hay productos con stock para reservar.</p>
+        )}
+        {reservaItems.map((item, idx) => {
+          const prod = todosProductos.find(p => p.id === item.producto_id)
+          const disponibles = productosReservables.filter(p =>
+            p.id === item.producto_id || !reservaItems.some((x, i) => i !== idx && x.producto_id === p.id)
+          )
+
+          return (
+            <div key={idx} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <select
+                  className="form-input form-select"
+                  style={{ flex: 2 }}
+                  value={item.producto_id ?? ''}
+                  onChange={e => {
+                    const nuevo = todosProductos.find(p => p.id === e.target.value)
+                    setReservaItems(r => r.map((x, i) => i === idx
+                      ? { ...x, producto_id: e.target.value, precio_unitario: nuevo?.precio_venta ?? 0, cantidad: 0 }
+                      : x))
+                  }}
+                >
+                  <option value="">Seleccionar...</option>
+                  {disponibles.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre} — Bs {Number(p.precio_venta).toFixed(2)} · disp. {p.stock_actual}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="form-input"
+                  type="number"
+                  min="1"
+                  max={prod?.stock_actual}
+                  style={{ width: 70 }}
+                  placeholder="Cant."
+                  disabled={!prod}
+                  value={item.cantidad || ''}
+                  onChange={e => {
+                    const cantidad = Math.min(Math.max(0, Math.floor(+e.target.value || 0)), prod?.stock_actual ?? 0)
+                    setReservaItems(r => r.map((x, i) => i === idx ? { ...x, cantidad } : x))
+                  }}
+                />
+                <button
+                  onClick={() => setReservaItems(r => r.filter((_, i) => i !== idx))}
+                  style={{ background: 'none', border: 'none', color: 'var(--err)', cursor: 'pointer', fontSize: 18 }}
+                >
+                  ×
+                </button>
+              </div>
+              {prod && (
+                <p style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 3 }}>
+                  Disponible: {prod.stock_actual} · Subtotal: Bs {(item.cantidad * prod.precio_venta).toFixed(2)}
+                </p>
+              )}
+            </div>
+          )
+        })}
         <button 
+          disabled={reservaItems.length >= productosReservables.length}
           onClick={() => setReservaItems(r => [
             ...r,
             { producto_id: '', cantidad: 0, precio_unitario: 0 }
@@ -1141,6 +1214,9 @@ export default function Ventas() {
           <span>Total</span>
           <span>Bs {totalReserva.toFixed(2)}</span>
         </div>
+        <p style={{ fontSize: 12, color: 'var(--text-soft)', marginBottom: 8 }}>
+          Medio de pago previsto. El cobro se registra al entregar la reserva.
+        </p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
           {MEDIOS.map(m=>(
             <button 
@@ -1164,7 +1240,7 @@ export default function Ventas() {
           <button 
             className="btn-primary" 
             style={{ flex:1 }} 
-            disabled={procesando || reservaItems.length===0 || !cajaSesionId} 
+            disabled={procesando || !reservaDesc.trim() || !reservaItems.some(i => i.producto_id && i.cantidad > 0) || !cajaSesionId} 
             onClick={registrarReserva}
           >
             {procesando?'Guardando...':'Registrar'}
